@@ -1,0 +1,108 @@
+.anatomy-page {
+  min-height: 100vh;
+  padding: 22px 24px 24px;
+  overflow: hidden;
+}
+
+.app-header {
+  max-width: 1720px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 auto;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.brand-icon {
+  display: none;
+}
+
+.brand h1 {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(28px, 2.2vw, 42px);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.brand p {
+  margin: 0;
+  color: var(--lavender);
+  font-family: "Comic Sans MS", "Bradley Hand", cursive;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--coral);
+}
+
+.anatomy-content {
+  max-width: 1720px;
+  height: min(760px, calc(100vh - 128px));
+  min-height: 620px;
+  display: grid;
+  grid-template-columns: 285px minmax(620px, 1fr) 330px;
+  gap: 18px;
+  margin: 12px auto 0;
+}
+
+@media (max-width: 1200px) {
+  .anatomy-content {
+    grid-template-columns: 240px minmax(0, 1fr) 290px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .anatomy-content {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  app-organ-info {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .anatomy-page {
+    padding: 16px;
+  }
+
+  .app-header {
+    height: 58px;
+  }
+
+  .header-status {
+    display: none;
+  }
+
+  .anatomy-content {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: auto;
+  }
+
+  app-organ-list {
+    display: none;
+  }
+}

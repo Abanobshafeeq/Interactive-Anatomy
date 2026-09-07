@@ -1,0 +1,54 @@
+<aside class="organ-list">
+  <div class="sidebar-header">
+    <div>
+      <h2>Body Systems</h2>
+      <p>Select an organ</p>
+    </div>
+
+    <span class="organ-count">
+      {{ organs.length }}
+    </span>
+  </div>
+
+  <div class="search-container">
+    <span class="search-icon">⌕</span>
+
+    <input
+      type="text"
+      placeholder="Search organs..."
+      (input)="updateSearchTerm($any($event.target).value)"
+    />
+  </div>
+
+  <div class="organs">
+    @for (organ of filteredOrgans(); track organ.id) {
+      <button
+        class="organ-item"
+        type="button"
+        [class.active]="selectedOrgan().id === organ.id"
+        (click)="selectOrgan(organ)"
+      >
+        <span class="organ-symbol">
+          <img
+            [src]="organ.image"
+            [alt]="organ.name"
+          />
+        </span>
+
+        <span class="organ-content">
+          <span class="organ-name">
+            {{ organ.name }}
+          </span>
+
+          <span class="organ-type">
+            Human anatomy
+          </span>
+        </span>
+
+        <span class="organ-arrow">
+          ›
+        </span>
+      </button>
+    }
+  </div>
+</aside>

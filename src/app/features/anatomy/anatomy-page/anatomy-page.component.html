@@ -1,0 +1,30 @@
+<div class="anatomy-page">
+  <!-- <header class="app-header">
+    <div class="brand">
+      <div>
+        <h1>Anatomy</h1>
+        <p>Interactive Human Anatomy</p>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <span class="status-dot"></span>
+      Anatomy Explorer
+    </div>
+  </header> -->
+
+  <main class="anatomy-content">
+    <app-organ-list
+      [selectedOrgan]="selectedOrgan()"
+      (organSelected)="selectOrgan($event)"
+    />
+
+    <app-organ-viewer
+      [organ]="selectedOrgan()"
+    />
+
+    <app-organ-info
+      [organ]="selectedOrgan()"
+    />
+  </main>
+</div>

@@ -1,0 +1,58 @@
+<aside class="organ-info">
+  <div class="info-header">
+    <span>SELECTED ORGAN</span>
+
+    <h2>
+      {{ organ().name }}
+    </h2>
+  </div>
+
+  <div class="info-content">
+    <section class="info-section">
+      <h3>Overview</h3>
+
+      <p>
+        {{ organ().description }}
+      </p>
+    </section>
+
+    <section class="info-section">
+      <h3>Function</h3>
+
+      <div class="function-card">
+        <span class="function-icon">↗</span>
+
+        <div>
+          <span class="function-label">
+            Primary function
+          </span>
+
+          <strong>
+            {{ organ().function }}
+          </strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="info-section">
+      <h3>Quick Facts</h3>
+
+      <div class="facts">
+        <div class="fact">
+          <span>System</span>
+          <strong>Human anatomy</strong>
+        </div>
+
+        <div class="fact">
+          <span>Type</span>
+          <strong>Organ</strong>
+        </div>
+
+        <div class="fact">
+          <span>Name</span>
+          <strong>{{ organ().name }}</strong>
+        </div>
+      </div>
+    </section>
+  </div>
+</aside>

@@ -1,0 +1,34 @@
+<section class="organ-viewer">
+  <div class="viewer-header">
+    <div>
+      <span class="viewer-label">
+        3D VIEWER
+      </span>
+
+      <h2>
+        {{ organ().name }}
+      </h2>
+    </div>
+
+    <div class="viewer-actions">
+      <button type="button" (click)="resetCamera()">
+        Reset
+      </button>
+
+      <button type="button" (click)="toggleAutoRotate()">
+        Auto Rotate
+      </button>
+    </div>
+  </div>
+
+  <div #canvasContainer class="viewer-content"></div>
+
+  <div class="viewer-pedestal">
+    <div class="pedestal-top"></div>
+    <div class="pedestal-body"></div>
+  </div>
+
+  <div class="viewer-hint">
+    Drag to rotate · Scroll to zoom
+  </div>
+</section>
