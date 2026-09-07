@@ -21,7 +21,38 @@
     </div>
   </div>
 
-  <div #canvasContainer class="viewer-content"></div>
+  <div #canvasContainer class="viewer-content" (click)="clearHotspot()">
+    <div class="hotspots-overlay">
+      @for (hotspot of hotspots2D(); track hotspot.data.id) {
+        <div class="hotspot-wrapper"
+             [style.left.px]="hotspot.x"
+             [style.top.px]="hotspot.y"
+             [class.hidden]="!hotspot.visible"
+             [class.active]="activeHotspot()?.id === hotspot.data.id">
+          
+          <button class="hotspot-dot" 
+                  (click)="selectHotspot(hotspot.data); $event.stopPropagation()">
+          </button>
+          
+          @if (activeHotspot()?.id === hotspot.data.id) {
+            <div class="hotspot-tooltip" (click)="$event.stopPropagation()">
+              <div class="tooltip-header">
+                <span class="tooltip-indicator"></span>
+                <h4>{{ hotspot.data.name }}</h4>
+                <button class="close-btn" (click)="clearHotspot(); $event.stopPropagation()">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+              <p>{{ hotspot.data.description }}</p>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
 
   <div class="viewer-pedestal">
     <div class="pedestal-top"></div>
