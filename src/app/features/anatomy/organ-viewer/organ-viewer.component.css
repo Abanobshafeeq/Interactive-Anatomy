@@ -336,6 +336,39 @@
   color: #4a5568;
 }
 
+.hotspot-data-input {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(220, 210, 200, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hotspot-data-input label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #718096);
+}
+
+.hotspot-data-input input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 210, 200, 0.8);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink, #2d3748);
+  background: rgba(255, 255, 255, 0.8);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.hotspot-data-input input:focus {
+  border-color: #f37b68;
+}
+
 @media (max-width: 768px) {
   .hotspot-tooltip {
     left: 50%;

@@ -123,7 +123,36 @@ export class AnatomyService {
     function: 'Structural support and protection',
     image: '/anatomy/skeleton/skeleton.png',
     model: '/models/human/skeleton.3DS',
-    hotspots: []
+    hotspots: [
+      {
+        id: 'skull',
+        name: 'Skull',
+        description: 'Protects the brain and forms the shape of the face.',
+        position: { x: 0, y: 0.8, z: 0.1 },
+        normal: { x: 0, y: 0.5, z: 0.866 }
+      },
+      {
+        id: 'ribcage',
+        name: 'Ribcage',
+        description: 'Protects the heart, lungs, and other major organs.',
+        position: { x: 0, y: 0.3, z: 0.15 },
+        normal: { x: 0, y: 0.2, z: 0.98 }
+      },
+      {
+        id: 'pelvis',
+        name: 'Pelvis',
+        description: 'Connects the spine to the lower limbs.',
+        position: { x: 0, y: -0.1, z: 0.1 },
+        normal: { x: 0, y: -0.5, z: 0.866 }
+      },
+      {
+        id: 'right-femur',
+        name: 'Right Femur',
+        description: 'The longest and strongest bone in the body.',
+        position: { x: -0.15, y: -0.5, z: 0.05 },
+        normal: { x: -0.866, y: 0, z: 0.5 }
+      }
+    ]
   },
   {
     id: 'skeleton-obj',
@@ -132,17 +161,47 @@ export class AnatomyService {
     function: 'Structural support and protection',
     image: '/anatomy/skeleton/skeleton.png',
     model: '/models/human/skeleton.obj',
-    hotspots: []
-  },
-  {
-    id: 'skeleton-mtl',
-    name: 'Skeleton (MTL)',
-    description: 'Materials for the human skeleton.',
-    function: 'Defines surface properties',
-    image: '/anatomy/skeleton/skeleton.png',
-    model: '/models/human/skeleton.mtl',
-    hotspots: []
+    hotspots: [
+      {
+        id: 'skull-obj',
+        name: 'Skull',
+        description: 'Protects the brain and forms the shape of the face.',
+        position: { x: 0, y: 0.8, z: 0.1 },
+        normal: { x: 0, y: 0.5, z: 0.866 }
+      },
+      {
+        id: 'ribcage-obj',
+        name: 'Ribcage',
+        description: 'Protects the heart, lungs, and other major organs.',
+        position: { x: 0, y: 0.3, z: 0.15 },
+        normal: { x: 0, y: 0.2, z: 0.98 }
+      },
+      {
+        id: 'pelvis-obj',
+        name: 'Pelvis',
+        description: 'Connects the spine to the lower limbs.',
+        position: { x: 0, y: -0.1, z: 0.1 },
+        normal: { x: 0, y: -0.5, z: 0.866 }
+      },
+      {
+        id: 'right-femur-obj',
+        name: 'Right Femur',
+        description: 'The longest and strongest bone in the body.',
+        position: { x: -0.15, y: -0.5, z: 0.05 },
+        normal: { x: -0.866, y: 0, z: 0.5 }
+      }
+    ]
   }
+  //,
+  // {
+  //   id: 'skeleton-mtl',
+  //   name: 'Skeleton (MTL)',
+  //   description: 'Materials for the human skeleton.',
+  //   function: 'Defines surface properties',
+  //   image: '/anatomy/skeleton/skeleton.png',
+  //   model: '/models/human/skeleton.mtl',
+  //   hotspots: []
+  // }
 ];
   getOrgans(): Organ[] {
     return this.organs;

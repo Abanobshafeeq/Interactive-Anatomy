@@ -8,6 +8,7 @@ import {
   input,
   signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
 
 import * as THREE from 'three';
@@ -30,6 +31,7 @@ export interface Hotspot2D {
 @Component({
   selector: 'app-organ-viewer',
   standalone: true,
+  imports: [FormsModule],
   templateUrl: './organ-viewer.component.html',
   styleUrl: './organ-viewer.component.css',
 })

@@ -4,6 +4,7 @@ export interface Hotspot {
   description: string;
   position: { x: number; y: number; z: number };
   normal?: { x: number; y: number; z: number };
+  value?: number;
 }
 
 export interface Organ {
