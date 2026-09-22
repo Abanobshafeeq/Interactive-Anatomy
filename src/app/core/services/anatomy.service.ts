@@ -121,7 +121,7 @@ export class AnatomyService {
     name: 'Skeleton (3DS)',
     description: 'Human skeleton in 3DS format.',
     function: 'Structural support and protection',
-    image: '',
+    image: '/anatomy/skeleton/skeleton.png',
     model: '/models/human/skeleton.3DS',
     hotspots: []
   },
@@ -130,7 +130,7 @@ export class AnatomyService {
     name: 'Skeleton (OBJ)',
     description: 'Human skeleton in OBJ format.',
     function: 'Structural support and protection',
-    image: '',
+    image: '/anatomy/skeleton/skeleton.png',
     model: '/models/human/skeleton.obj',
     hotspots: []
   },
@@ -139,7 +139,7 @@ export class AnatomyService {
     name: 'Skeleton (MTL)',
     description: 'Materials for the human skeleton.',
     function: 'Defines surface properties',
-    image: '',
+    image: '/anatomy/skeleton/skeleton.png',
     model: '/models/human/skeleton.mtl',
     hotspots: []
   }

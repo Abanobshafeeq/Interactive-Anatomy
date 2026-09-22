@@ -82,11 +82,7 @@
   gap: 4px;
   min-height: 0;
   overflow: auto;
-  scrollbar-width: none;
-}
-
-.organs::-webkit-scrollbar {
-  display: none;
+  padding-right: 4px;
 }
 
 .organ-item {

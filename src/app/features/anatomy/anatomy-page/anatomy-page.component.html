@@ -15,15 +15,18 @@
 
   <main class="anatomy-content">
     <app-organ-list
+      class="organ-list-component"
       [selectedOrgan]="selectedOrgan()"
       (organSelected)="selectOrgan($event)"
     />
 
     <app-organ-viewer
+      class="organ-viewer-component"
       [organ]="selectedOrgan()"
     />
 
     <app-organ-info
+      class="organ-info-component"
       [organ]="selectedOrgan()"
     />
   </main>

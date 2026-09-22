@@ -1,9 +1,19 @@
 .anatomy-page {
-  min-height: 100vh;
-  padding: 22px 24px 24px;
+  /* height: 100vh !important; */
+  padding: 2px 24px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
-
+.organ-list-component {
+  height: 96vh;
+}
+.organ-viewer-component {
+  height: 96vh;
+}
+.organ-info-component {
+  height: 96vh;
+}
 .app-header {
   max-width: 1720px;
   height: 68px;
@@ -59,12 +69,13 @@
 
 .anatomy-content {
   max-width: 1720px;
-  height: min(760px, calc(100vh - 128px));
-  min-height: 620px;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 285px minmax(620px, 1fr) 330px;
   gap: 18px;
   margin: 12px auto 0;
+  width: 100%;
 }
 
 @media (max-width: 1200px) {
