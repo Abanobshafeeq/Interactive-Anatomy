@@ -50,9 +50,12 @@
               
               <div class="hotspot-data-input">
                 <label>Stored Data:</label>
-                <input type="number" 
-                       [(ngModel)]="hotspot.data.value" 
-                       placeholder="Enter numerical data..." />
+                <div class="input-group">
+                  <input type="number" 
+                         [(ngModel)]="hotspot.data.value" 
+                         placeholder="Enter numerical data..." />
+                  <button type="button" class="save-btn" (click)="clearHotspot(); $event.stopPropagation()">Save</button>
+                </div>
               </div>
             </div>
           }

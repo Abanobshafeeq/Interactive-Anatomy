@@ -128,28 +128,28 @@ export class AnatomyService {
         id: 'skull',
         name: 'Skull',
         description: 'Protects the brain and forms the shape of the face.',
-        position: { x: 0, y: 0.85, z: 0.12 },
+        position: { x: 0, y: 20, z: 2 },
         normal: { x: 0, y: 0.2, z: 0.98 }
       },
       {
         id: 'ribcage',
         name: 'Ribcage',
         description: 'Protects the heart, lungs, and other major organs.',
-        position: { x: 0, y: 0.45, z: 0.18 },
+        position: { x: 0, y: 6, z: 4 },
         normal: { x: 0, y: 0.1, z: 0.99 }
       },
       {
         id: 'pelvis',
         name: 'Pelvis',
         description: 'Connects the spine to the lower limbs.',
-        position: { x: 0, y: 0.05, z: 0.1 },
+        position: { x: 0, y: -8, z: 2 },
         normal: { x: 0, y: -0.2, z: 0.98 }
       },
       {
         id: 'right-femur',
         name: 'Right Femur',
         description: 'The longest and strongest bone in the body.',
-        position: { x: -0.14, y: -0.25, z: 0.08 },
+        position: { x: -4, y: -18, z: 0 },
         normal: { x: -0.866, y: 0, z: 0.5 }
       }
     ]
@@ -166,28 +166,28 @@ export class AnatomyService {
         id: 'skull-obj',
         name: 'Skull',
         description: 'Protects the brain and forms the shape of the face.',
-        position: { x: 0, y: 0.85, z: 0.12 },
+        position: { x: 0, y: 20, z: 2 },
         normal: { x: 0, y: 0.2, z: 0.98 }
       },
       {
         id: 'ribcage-obj',
         name: 'Ribcage',
         description: 'Protects the heart, lungs, and other major organs.',
-        position: { x: 0, y: 0.45, z: 0.18 },
+        position: { x: 0, y: 6, z: 4 },
         normal: { x: 0, y: 0.1, z: 0.99 }
       },
       {
         id: 'pelvis-obj',
         name: 'Pelvis',
         description: 'Connects the spine to the lower limbs.',
-        position: { x: 0, y: 0.05, z: 0.1 },
+        position: { x: 0, y: -8, z: 2 },
         normal: { x: 0, y: -0.2, z: 0.98 }
       },
       {
         id: 'right-femur-obj',
         name: 'Right Femur',
         description: 'The longest and strongest bone in the body.',
-        position: { x: -0.14, y: -0.25, z: 0.08 },
+        position: { x: -4, y: -18, z: 0 },
         normal: { x: -0.866, y: 0, z: 0.5 }
       }
     ]

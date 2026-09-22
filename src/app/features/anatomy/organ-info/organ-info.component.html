@@ -54,5 +54,28 @@
         </div>
       </div>
     </section>
+
+    @if (organ().hotspots && organ().hotspots!.length > 0) {
+      <section class="info-section">
+        <h3>Recorded Data</h3>
+        
+        <div class="facts">
+          @for (hotspot of organ().hotspots; track hotspot.id) {
+            @if (hotspot.value !== undefined && hotspot.value !== null) {
+              <div class="fact">
+                <span>{{ hotspot.name }}</span>
+                <strong>{{ hotspot.value }}</strong>
+              </div>
+            }
+          }
+          
+          @if (hasNoRecordedData(organ())) {
+            <div class="fact" style="justify-content: center;">
+              <span style="text-align: center; width: 100%;">No data recorded yet.</span>
+            </div>
+          }
+        </div>
+      </section>
+    }
   </div>
 </aside>

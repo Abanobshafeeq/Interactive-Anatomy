@@ -55,7 +55,6 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private readonly mtlLoader = new MTLLoader();
 
   private modelRequestId = 0;
-  private readonly hotspotsGroup = new THREE.Group();
 
   readonly isLoading = input(false);
 
@@ -97,8 +96,6 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     );
 
     this.camera.position.set(0, 0, 4);
-    
-    this.scene.add(this.hotspotsGroup);
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -161,11 +158,6 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.disposeModel(this.model);
       this.scene.remove(this.model);
       this.model = undefined;
-      
-      // Clear all dummy hotspots from the group
-      while (this.hotspotsGroup.children.length > 0) {
-        this.hotspotsGroup.remove(this.hotspotsGroup.children[0]);
-      }
       this.hotspotObjects.clear();
     }
 
@@ -194,7 +186,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
             const center = new THREE.Vector3(0, 0.45, 0);
             dummy.userData['normal'] = dummy.position.clone().sub(center).normalize();
           }
-          this.hotspotsGroup.add(dummy);
+          this.model.add(dummy);
           this.hotspotObjects.set(hotspot.id, dummy);
         }
       }
@@ -338,7 +330,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const newHotspots2D: Hotspot2D[] = [];
 
     const tempQuat = new THREE.Quaternion();
-    this.hotspotsGroup.getWorldQuaternion(tempQuat); // Usually identity since we don't rotate it
+    const modelQuat = this.model.getWorldQuaternion(tempQuat);
 
     for (const hotspot of organ.hotspots) {
       const dummy = this.hotspotObjects.get(hotspot.id);
@@ -351,7 +343,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       const localNormal = dummy.userData['normal'] as THREE.Vector3 | undefined;
       let isFacingCamera = true;
       if (localNormal) {
-        const worldNormal = localNormal.clone().applyQuaternion(tempQuat);
+        const worldNormal = localNormal.clone().applyQuaternion(modelQuat);
         const viewDir = this.camera.position.clone().sub(worldPosition).normalize();
         isFacingCamera = worldNormal.dot(viewDir) > 0.05;
       }

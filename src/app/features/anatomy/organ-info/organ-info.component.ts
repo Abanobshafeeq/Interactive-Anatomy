@@ -11,4 +11,10 @@ import { Organ } from '../../../core/models/organ.model';
 export class OrganInfoComponent {
     organ = input.required<Organ>();
 
+    hasNoRecordedData(organ: Organ): boolean {
+      if (!organ.hotspots || organ.hotspots.length === 0) {
+        return true;
+      }
+      return organ.hotspots.every(h => h.value === undefined || h.value === null);
+    }
 }
