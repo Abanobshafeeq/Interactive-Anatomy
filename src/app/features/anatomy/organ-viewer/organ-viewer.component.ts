@@ -12,6 +12,9 @@ import {
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { TDSLoader } from 'three/examples/jsm/loaders/TDSLoader.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
@@ -44,7 +47,10 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private model?: THREE.Object3D;
   private animationId = 0;
 
-  private readonly loader = new GLTFLoader();
+  private readonly gltfLoader = new GLTFLoader();
+  private readonly tdsLoader = new TDSLoader();
+  private readonly objLoader = new OBJLoader();
+  private readonly mtlLoader = new MTLLoader();
 
   private modelRequestId = 0;
 
@@ -153,54 +159,97 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.hotspotObjects.clear();
     }
 
-    this.loader.setMeshoptDecoder(MeshoptDecoder);
+    const onLoad = (object: THREE.Object3D) => {
+      if (requestId !== this.modelRequestId) {
+        this.disposeModel(object);
+        return;
+      }
 
-    this.loader.load(
-      path,
-      (gltf) => {
-        if (requestId !== this.modelRequestId) {
-          this.disposeModel(gltf.scene);
-          return;
-        }
+      this.model = object;
 
-        this.model = gltf.scene;
-
-        // Attach hotspot dummy objects to the model
-        const hotspots = this.organ().hotspots;
-        if (hotspots) {
-          for (const hotspot of hotspots) {
-            const dummy = new THREE.Object3D();
-            dummy.position.set(hotspot.position.x, hotspot.position.y, hotspot.position.z);
-            if (hotspot.normal) {
-              dummy.userData['normal'] = new THREE.Vector3(
-                hotspot.normal.x,
-                hotspot.normal.y,
-                hotspot.normal.z,
-              ).normalize();
-            } else {
-              // Fallback outward normal relative to model center
-              const center = new THREE.Vector3(0, 0.45, 0);
-              dummy.userData['normal'] = dummy.position.clone().sub(center).normalize();
-            }
-            this.model.add(dummy);
-            this.hotspotObjects.set(hotspot.id, dummy);
+      // Attach hotspot dummy objects to the model
+      const hotspots = this.organ().hotspots;
+      if (hotspots) {
+        for (const hotspot of hotspots) {
+          const dummy = new THREE.Object3D();
+          dummy.position.set(hotspot.position.x, hotspot.position.y, hotspot.position.z);
+          if (hotspot.normal) {
+            dummy.userData['normal'] = new THREE.Vector3(
+              hotspot.normal.x,
+              hotspot.normal.y,
+              hotspot.normal.z,
+            ).normalize();
+          } else {
+            // Fallback outward normal relative to model center
+            const center = new THREE.Vector3(0, 0.45, 0);
+            dummy.userData['normal'] = dummy.position.clone().sub(center).normalize();
           }
+          this.model.add(dummy);
+          this.hotspotObjects.set(hotspot.id, dummy);
         }
+      }
 
-        this.prepareModel(this.model);
+      this.prepareModel(this.model);
+      this.scene.add(this.model);
+      this.resetCamera();
+    };
 
-        this.scene.add(this.model);
+    const onError = (error: unknown) => {
+      if (requestId !== this.modelRequestId) {
+        return;
+      }
+      console.error('Failed to load anatomy model:', error);
+    };
 
-        this.resetCamera();
-      },
-      undefined,
-      (error) => {
-        if (requestId !== this.modelRequestId) {
-          return;
+    if (path.toLowerCase().endsWith('.gltf') || path.toLowerCase().endsWith('.glb')) {
+      this.gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+      this.gltfLoader.load(
+        path,
+        (gltf) => onLoad(gltf.scene),
+        undefined,
+        onError
+      );
+    } else if (path.toLowerCase().endsWith('.3ds')) {
+      this.tdsLoader.load(
+        path,
+        onLoad,
+        undefined,
+        onError
+      );
+    } else if (path.toLowerCase().endsWith('.obj')) {
+      const mtlPath = path.substring(0, path.lastIndexOf('.')) + '.mtl';
+     /////////////// 
+      this.mtlLoader.load(
+        mtlPath,
+        (materials) => {
+          materials.preload();
+          // Create a fresh loader to avoid polluting the class singleton
+          import('three/examples/jsm/loaders/OBJLoader.js').then(({ OBJLoader }) => {
+            const loader = new OBJLoader();
+            loader.setMaterials(materials);
+            loader.load(path, onLoad, undefined, onError);
+          });
+        },
+        undefined,
+        (error) => {
+          console.warn('Failed to load MTL for OBJ, falling back to geometry only.', error);
+          this.objLoader.load(path, onLoad, undefined, onError);
         }
-        console.error('Failed to load anatomy model:', error);
-      },
-    );
+      );
+    } else if (path.toLowerCase().endsWith('.mtl')) {
+      this.mtlLoader.load(
+        path,
+        (_materials) => {
+          // MTL file just contains materials. Create a dummy object to satisfy the viewer.
+          const dummyGroup = new THREE.Group();
+          onLoad(dummyGroup);
+        },
+        undefined,
+        onError
+      );
+    } else {
+      console.error('Unsupported model format:', path);
+    }
   }
 
   private prepareModel(model: THREE.Object3D): void {
@@ -212,12 +261,13 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
 
-    model.position.sub(center);
-
     const maxSize = Math.max(size.x, size.y, size.z);
     if (maxSize > 0) {
       const scale = 2 / maxSize;
       model.scale.setScalar(scale);
+      model.position.copy(center).multiplyScalar(-scale);
+    } else {
+      model.position.copy(center).multiplyScalar(-1);
     }
   }
 

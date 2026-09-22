@@ -115,6 +115,33 @@ export class AnatomyService {
         normal: { x: 0.05, y: 0.15, z: 0.98 }
       }
     ]
+  },
+  {
+    id: 'skeleton-3ds',
+    name: 'Skeleton (3DS)',
+    description: 'Human skeleton in 3DS format.',
+    function: 'Structural support and protection',
+    image: '',
+    model: '/models/human/skeleton.3DS',
+    hotspots: []
+  },
+  {
+    id: 'skeleton-obj',
+    name: 'Skeleton (OBJ)',
+    description: 'Human skeleton in OBJ format.',
+    function: 'Structural support and protection',
+    image: '',
+    model: '/models/human/skeleton.obj',
+    hotspots: []
+  },
+  {
+    id: 'skeleton-mtl',
+    name: 'Skeleton (MTL)',
+    description: 'Materials for the human skeleton.',
+    function: 'Defines surface properties',
+    image: '',
+    model: '/models/human/skeleton.mtl',
+    hotspots: []
   }
 ];
   getOrgans(): Organ[] {
