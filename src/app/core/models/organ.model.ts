@@ -5,6 +5,7 @@ export interface Hotspot {
   position: { x: number; y: number; z: number };
   normal?: { x: number; y: number; z: number };
   value?: number;
+  isCustom?: boolean;
 }
 
 export interface Organ {

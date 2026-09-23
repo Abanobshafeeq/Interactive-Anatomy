@@ -63,7 +63,12 @@
           @for (hotspot of organ().hotspots; track hotspot.id) {
             @if (hotspot.value !== undefined && hotspot.value !== null) {
               <div class="fact">
-                <span>{{ hotspot.name }}</span>
+                <span style="display: flex; align-items: center; gap: 6px;">
+                  @if (hotspot.isCustom) {
+                    <span class="custom-indicator" title="Custom Point"></span>
+                  }
+                  {{ hotspot.name }}
+                </span>
                 <strong>{{ hotspot.value }}</strong>
               </div>
             }

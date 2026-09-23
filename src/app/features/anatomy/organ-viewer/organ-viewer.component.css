@@ -86,6 +86,19 @@
   color: var(--ink);
 }
 
+.place-point-btn.active {
+  background: rgba(243, 123, 104, 0.15);
+  border-color: #f37b68;
+  color: #d65a47;
+  animation: pulse-border 2s infinite;
+}
+
+@keyframes pulse-border {
+  0% { box-shadow: 0 0 0 0 rgba(243, 123, 104, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(243, 123, 104, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(243, 123, 104, 0); }
+}
+
 .viewer-content {
   position: absolute;
   inset: 0;
@@ -259,6 +272,23 @@
   border-color: #d65a47;
 }
 
+/* Custom Hotspots (Blue) */
+.hotspot-dot.custom {
+  border-color: #4a90d9;
+}
+
+.hotspot-dot.custom::after {
+  background: rgba(74, 144, 217, 0.2);
+}
+
+.hotspot-wrapper.active .hotspot-dot.custom {
+  border-color: #2b6cb0;
+}
+
+.tooltip-indicator.custom {
+  background: #4a90d9;
+}
+
 .hotspot-tooltip {
   position: absolute;
   top: 50%;
@@ -329,6 +359,24 @@
   color: #1a202c;
 }
 
+.delete-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  margin: -4px -4px -4px auto;
+  color: #e53e3e;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.delete-btn:hover {
+  background: rgba(229, 62, 62, 0.1);
+}
+
 .hotspot-tooltip p {
   margin: 0;
   font-size: 13px;
@@ -390,6 +438,73 @@
 
 .save-btn:hover {
   background: #d65a47;
+}
+
+.pending-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.pending-form input,
+.pending-form textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 210, 200, 0.8);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink, #2d3748);
+  background: rgba(255, 255, 255, 0.8);
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.pending-form textarea {
+  resize: vertical;
+}
+
+.pending-form input:focus,
+.pending-form textarea:focus {
+  border-color: #4a90d9;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.pending-actions .save-btn {
+  background: #4a90d9;
+}
+
+.pending-actions .save-btn:hover {
+  background: #2b6cb0;
+}
+
+.pending-actions .save-btn:disabled {
+  background: #a0aec0;
+  cursor: not-allowed;
+}
+
+.cancel-btn {
+  background: rgba(0, 0, 0, 0.05);
+  color: #4a5568;
+  border: none;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  min-height: 28px;
+}
+
+.cancel-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 @media (max-width: 768px) {

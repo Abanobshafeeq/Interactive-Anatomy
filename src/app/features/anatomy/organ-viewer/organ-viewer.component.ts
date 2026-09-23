@@ -5,6 +5,7 @@ import {
   OnDestroy,
   ViewChild,
   effect,
+  inject,
   input,
   signal,
 } from '@angular/core';
@@ -20,6 +21,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 import { Organ, Hotspot } from '../../../core/models/organ.model';
+import { HotspotStorageService } from '../../../core/services/hotspot-storage.service';
 
 export interface Hotspot2D {
   data: Hotspot;
@@ -61,7 +63,18 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   readonly hotspots2D = signal<Hotspot2D[]>([]);
   readonly activeHotspot = signal<Hotspot | null>(null);
 
+  readonly placementMode = signal(false);
+  readonly pendingHotspot = signal<{ position: THREE.Vector3, normal: THREE.Vector3 } | null>(null);
+  
+  pendingName = '';
+  pendingDescription = '';
+  pendingValue: number | undefined;
+
   private autoRotate = false;
+  
+  private interactionRaycaster = new THREE.Raycaster();
+  private mouse = new THREE.Vector2();
+  private readonly hotspotStorage = inject(HotspotStorageService);
 
   constructor() {
     effect(() => {
@@ -146,6 +159,10 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     this.scene.add(rimLight);
 
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener('pointerdown', this.handlePointerDown);
+    canvas.addEventListener('pointermove', this.handlePointerMove);
+
     window.addEventListener('resize', this.handleResize);
   }
 
@@ -168,8 +185,15 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       }
 
       this.model = object;
+      
+      // Load custom hotspots and merge them
+      const customHotspots = this.hotspotStorage.loadCustomHotspots(this.organ().id);
+      if (!this.organ().hotspots) {
+        this.organ().hotspots = [];
+      }
+      this.organ().hotspots = this.organ().hotspots!.filter(h => !h.isCustom).concat(customHotspots);
 
-      // Attach hotspot dummy objects to the model
+      // Attach hotspot dummy objects
       const hotspots = this.organ().hotspots;
       if (hotspots) {
         for (const hotspot of hotspots) {
@@ -186,7 +210,13 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
             const center = new THREE.Vector3(0, 0.45, 0);
             dummy.userData['normal'] = dummy.position.clone().sub(center).normalize();
           }
-          this.model.add(dummy);
+          dummy.userData['isCustom'] = !!hotspot.isCustom;
+          
+          if (hotspot.isCustom) {
+            this.scene.add(dummy);
+          } else {
+            this.model.add(dummy);
+          }
           this.hotspotObjects.set(hotspot.id, dummy);
         }
       }
@@ -343,7 +373,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       const localNormal = dummy.userData['normal'] as THREE.Vector3 | undefined;
       let isFacingCamera = true;
       if (localNormal) {
-        const worldNormal = localNormal.clone().applyQuaternion(modelQuat);
+        let worldNormal: THREE.Vector3;
+        if (dummy.userData['isCustom']) {
+           worldNormal = localNormal.clone();
+        } else {
+           worldNormal = localNormal.clone().applyQuaternion(modelQuat);
+        }
         const viewDir = this.camera.position.clone().sub(worldPosition).normalize();
         isFacingCamera = worldNormal.dot(viewDir) > 0.05;
       }
@@ -404,8 +439,126 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.renderer.setSize(width, height);
   };
 
+  private updateMouse(event: PointerEvent): void {
+    const container = this.canvasContainer.nativeElement;
+    const rect = container.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+  }
+
+  private handlePointerMove = (event: PointerEvent): void => {
+    if (this.placementMode()) {
+      this.updateMouse(event);
+      this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
+      const intersects = this.interactionRaycaster.intersectObject(this.model!, true);
+      const container = this.canvasContainer.nativeElement;
+      if (intersects.length > 0) {
+        container.style.cursor = 'crosshair';
+      } else {
+        container.style.cursor = 'default';
+      }
+    }
+  };
+
+  private handlePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return; // Only left click
+    
+    // Only proceed if clicking on the canvas directly
+    if (event.target !== this.renderer.domElement) return;
+
+    if (this.placementMode()) {
+      if (this.pendingHotspot()) return; // Wait until current point is handled
+
+      this.updateMouse(event);
+      this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
+      const intersects = this.interactionRaycaster.intersectObject(this.model!, true);
+
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        if (hit.face) {
+          // Use world space position directly from raycaster
+          const point = hit.point.clone(); 
+          // Extract normal in world space
+          const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+          const worldNormal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+          
+          this.pendingHotspot.set({ position: point, normal: worldNormal });
+        }
+      }
+    }
+  };
+  
+  togglePlacementMode(): void {
+    const isPlacing = !this.placementMode();
+    this.placementMode.set(isPlacing);
+    this.controls.enabled = !isPlacing; // Disable camera rotation while placing
+    if (!isPlacing) {
+      this.cancelPlacement();
+      this.canvasContainer.nativeElement.style.cursor = 'default';
+    }
+    this.clearHotspot();
+  }
+
+  cancelPlacement(): void {
+    this.pendingHotspot.set(null);
+    this.pendingName = '';
+    this.pendingDescription = '';
+    this.pendingValue = undefined;
+  }
+
+  confirmPlacement(): void {
+    const data = this.pendingHotspot();
+    if (!data || !this.pendingName.trim()) return;
+
+    const newHotspot: Hotspot = {
+      id: `custom-${Date.now()}`,
+      name: this.pendingName.trim(),
+      description: this.pendingDescription.trim(),
+      value: this.pendingValue,
+      position: { x: data.position.x, y: data.position.y, z: data.position.z },
+      normal: { x: data.normal.x, y: data.normal.y, z: data.normal.z },
+      isCustom: true
+    };
+
+    if (!this.organ().hotspots) {
+      this.organ().hotspots = [];
+    }
+    
+    // Update active model array
+    this.organ().hotspots!.push(newHotspot);
+    
+    // Persist
+    this.hotspotStorage.saveCustomHotspots(this.organ().id, this.organ().hotspots!);
+    
+    // Reload model to inject the new mesh
+    this.loadModel(this.organ().model);
+
+    this.togglePlacementMode(); // Exit mode
+  }
+
+  deleteHotspot(id: string): void {
+    if (!this.organ().hotspots) return;
+    
+    // Remove from array
+    this.organ().hotspots = this.organ().hotspots!.filter(h => h.id !== id);
+    
+    // Save to storage
+    this.hotspotStorage.saveCustomHotspots(this.organ().id, this.organ().hotspots!);
+    
+    this.clearHotspot();
+    
+    // Reload model to remove the mesh
+    this.loadModel(this.organ().model);
+  }
+
   ngOnDestroy(): void {
     cancelAnimationFrame(this.animationId);
+
+    const canvas = this.renderer?.domElement;
+    if (canvas) {
+      canvas.removeEventListener('pointerdown', this.handlePointerDown);
+      canvas.removeEventListener('pointermove', this.handlePointerMove);
+    }
 
     window.removeEventListener('resize', this.handleResize);
 

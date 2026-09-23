@@ -11,6 +11,13 @@
     </div>
 
     <div class="viewer-actions">
+      <button type="button" 
+              class="place-point-btn"
+              [class.active]="placementMode()"
+              (click)="togglePlacementMode()">
+        {{ placementMode() ? 'Cancel Placement' : '📌 Place Point' }}
+      </button>
+
       <button type="button" (click)="resetCamera()">
         Reset
       </button>
@@ -30,15 +37,24 @@
              [class.hidden]="!hotspot.visible"
              [class.active]="activeHotspot()?.id === hotspot.data.id">
           
-          <button class="hotspot-dot" 
+          <button class="hotspot-dot"
+                  [class.custom]="hotspot.data.isCustom"
                   (click)="selectHotspot(hotspot.data); $event.stopPropagation()">
           </button>
           
           @if (activeHotspot()?.id === hotspot.data.id) {
             <div class="hotspot-tooltip" (click)="$event.stopPropagation()">
               <div class="tooltip-header">
-                <span class="tooltip-indicator"></span>
+                <span class="tooltip-indicator" [class.custom]="hotspot.data.isCustom"></span>
                 <h4>{{ hotspot.data.name }}</h4>
+                @if (hotspot.data.isCustom) {
+                  <button class="delete-btn" (click)="deleteHotspot(hotspot.data.id); $event.stopPropagation()" title="Delete Point">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                  </button>
+                }
                 <button class="close-btn" (click)="clearHotspot(); $event.stopPropagation()">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -59,6 +75,36 @@
               </div>
             </div>
           }
+        </div>
+      }
+      
+      @if (pendingHotspot(); as pending) {
+        <div class="hotspot-wrapper active"
+             style="left: 50%; top: 50%;"> <!-- Centered tooltip for creation -->
+             
+          <div class="hotspot-tooltip" (click)="$event.stopPropagation()">
+            <div class="tooltip-header">
+              <span class="tooltip-indicator custom"></span>
+              <h4>New Custom Point</h4>
+              <button class="close-btn" (click)="cancelPlacement(); $event.stopPropagation()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            
+            <div class="pending-form">
+              <input type="text" [(ngModel)]="pendingName" placeholder="Point Name (Required)" required />
+              <textarea [(ngModel)]="pendingDescription" placeholder="Description (Optional)" rows="2"></textarea>
+              <input type="number" [(ngModel)]="pendingValue" placeholder="Numerical Value (Optional)" />
+              
+              <div class="pending-actions">
+                <button type="button" class="cancel-btn" (click)="cancelPlacement()">Cancel</button>
+                <button type="button" class="save-btn" [disabled]="!pendingName.trim()" (click)="confirmPlacement()">Create</button>
+              </div>
+            </div>
+          </div>
         </div>
       }
     </div>

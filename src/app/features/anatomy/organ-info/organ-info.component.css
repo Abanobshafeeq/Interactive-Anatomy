@@ -122,3 +122,12 @@
   font-weight: 500;
   text-align: right;
 }
+
+.custom-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #4a90d9;
+  display: inline-block;
+  flex-shrink: 0;
+}
