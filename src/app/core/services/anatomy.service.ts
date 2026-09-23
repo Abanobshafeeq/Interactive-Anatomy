@@ -191,6 +191,16 @@ export class AnatomyService {
         normal: { x: -0.866, y: 0, z: 0.5 }
       }
     ]
+  },
+  {
+     id: 'teeth-obj',
+    name: 'Teeth (OBJ)',
+    description: 'Human teeth in OBJ format.',
+    function: 'Structural support and protection',
+    image: '/anatomy/teeth/teeth.png',
+    model: '/models/teeth.OBJ',
+    hotspots: [],
+    clickableMeshes: ['Group1014', 'Group1059']
   }
   //,
   // {

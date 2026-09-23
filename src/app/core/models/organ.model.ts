@@ -16,4 +16,5 @@ export interface Organ {
   image: string;
   model: string;
   hotspots?: Hotspot[];
+  clickableMeshes?: string[];
 }

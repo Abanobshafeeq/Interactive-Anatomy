@@ -54,9 +54,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private readonly gltfLoader = new GLTFLoader();
   private readonly tdsLoader = new TDSLoader();
   private readonly objLoader = new OBJLoader();
-  private readonly mtlLoader = new MTLLoader();
 
   private modelRequestId = 0;
+  
+  private pixelCanvas = document.createElement('canvas');
+  private pixelCtx = this.pixelCanvas.getContext('2d', { willReadFrequently: true });
 
   readonly isLoading = input(false);
 
@@ -250,8 +252,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       );
     } else if (path.toLowerCase().endsWith('.obj')) {
       const mtlPath = path.substring(0, path.lastIndexOf('.')) + '.mtl';
-     /////////////// 
-      this.mtlLoader.load(
+      const basePath = path.substring(0, path.lastIndexOf('/') + 1);
+      
+      const mtlLoader = new MTLLoader();
+      mtlLoader.setResourcePath(basePath);
+      
+      mtlLoader.load(
         mtlPath,
         (materials) => {
           materials.preload();
@@ -269,7 +275,8 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         }
       );
     } else if (path.toLowerCase().endsWith('.mtl')) {
-      this.mtlLoader.load(
+      const mtlLoader = new MTLLoader();
+      mtlLoader.load(
         path,
         (_materials) => {
           // MTL file just contains materials. Create a dummy object to satisfy the viewer.
@@ -452,7 +459,18 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
       const intersects = this.interactionRaycaster.intersectObject(this.model!, true);
       const container = this.canvasContainer.nativeElement;
-      if (intersects.length > 0) {
+      
+      let hasValidHit = false;
+      const allowed = this.organ().clickableMeshes;
+      if (allowed && allowed.length > 0) {
+        // If clickableMeshes is defined, we also perform texture-based filtering for gums
+        const hit = intersects.find(i => allowed.includes(i.object.name) && !this.checkIsGum(i));
+        hasValidHit = !!hit;
+      } else {
+        hasValidHit = intersects.length > 0;
+      }
+
+      if (hasValidHit) {
         container.style.cursor = 'crosshair';
       } else {
         container.style.cursor = 'default';
@@ -472,18 +490,23 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.updateMouse(event);
       this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
       const intersects = this.interactionRaycaster.intersectObject(this.model!, true);
+      
+      let hit: THREE.Intersection | undefined;
+      const allowed = this.organ().clickableMeshes;
+      if (allowed && allowed.length > 0) {
+        hit = intersects.find(i => allowed.includes(i.object.name) && !this.checkIsGum(i));
+      } else {
+        hit = intersects.length > 0 ? intersects[0] : undefined;
+      }
 
-      if (intersects.length > 0) {
-        const hit = intersects[0];
-        if (hit.face) {
-          // Use world space position directly from raycaster
-          const point = hit.point.clone(); 
-          // Extract normal in world space
-          const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-          const worldNormal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
-          
-          this.pendingHotspot.set({ position: point, normal: worldNormal });
-        }
+      if (hit && hit.face) {
+        // Use world space position directly from raycaster
+        const point = hit.point.clone(); 
+        // Extract normal in world space
+        const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+        const worldNormal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+        
+        this.pendingHotspot.set({ position: point, normal: worldNormal });
       }
     }
   };
@@ -571,5 +594,43 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.controls?.dispose();
 
     this.renderer?.dispose();
+  }
+
+  private checkIsGum(hit: THREE.Intersection): boolean {
+    if (!hit.uv || !this.pixelCtx) return false;
+    
+    const mesh = hit.object as THREE.Mesh;
+    const material = mesh.material as any;
+    const mat = Array.isArray(material) ? material[0] : material;
+    
+    if (mat && mat.map && mat.map.image) {
+      const img = mat.map.image;
+      if (!img.width || !img.height) return false;
+      
+      this.pixelCanvas.width = 1;
+      this.pixelCanvas.height = 1;
+      
+      const x = Math.floor(hit.uv.x * img.width);
+      // UV y is inverted for WebGL textures usually
+      const y = Math.floor((1 - hit.uv.y) * img.height);
+      
+      try {
+        this.pixelCtx.drawImage(img, x, y, 1, 1, 0, 0, 1, 1);
+        const data = this.pixelCtx.getImageData(0, 0, 1, 1).data;
+        
+        const r = data[0];
+        const g = data[1];
+        const b = data[2];
+        
+        // Gums and tongue are pink/red. Teeth are white/yellow.
+        // Pink means red is significantly higher than green and blue.
+        if (r > g + 25 && r > b + 25 && g < 180) {
+          return true; // Rejected as Gum
+        }
+      } catch (e) {
+        // Tainted canvas or draw error, fail gracefully
+      }
+    }
+    return false;
   }
 }
