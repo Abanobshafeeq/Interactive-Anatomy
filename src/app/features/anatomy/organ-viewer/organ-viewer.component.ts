@@ -254,7 +254,14 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       const mtlPath = path.substring(0, path.lastIndexOf('.')) + '.mtl';
       const basePath = path.substring(0, path.lastIndexOf('/') + 1);
       
-      const mtlLoader = new MTLLoader();
+      const manager = new THREE.LoadingManager();
+      manager.onLoad = () => {
+        if (this.model && requestId === this.modelRequestId) {
+          this.model.visible = true;
+        }
+      };
+      
+      const mtlLoader = new MTLLoader(manager);
       mtlLoader.setResourcePath(basePath);
       
       mtlLoader.load(
@@ -263,9 +270,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
           materials.preload();
           // Create a fresh loader to avoid polluting the class singleton
           import('three/examples/jsm/loaders/OBJLoader.js').then(({ OBJLoader }) => {
-            const loader = new OBJLoader();
+            const loader = new OBJLoader(manager);
             loader.setMaterials(materials);
-            loader.load(path, onLoad, undefined, onError);
+            loader.load(path, (obj) => {
+              obj.visible = false; // Hide until textures are fully loaded
+              onLoad(obj);
+            }, undefined, onError);
           });
         },
         undefined,

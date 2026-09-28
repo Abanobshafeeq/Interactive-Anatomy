@@ -12,6 +12,6 @@ newmtl defaultMat
 	Kd 1.000 1.000 1.000
 	Ks 0.2000 0.2000 0.2000
 	Ke 0.0000 0.0000 0.0000
-	map_Kd Texture/teeth_defaultMat_Diffuse.png
-	map_Bump -bm 1.0 Texture/teeth_defaultMat_Normal.png
-	map_Ks Texture/teeth_defaultMat_Specular.png
+	map_Kd Texture/teeth_defaultMat_Diffuse.webp
+	map_Bump -bm 1.0 Texture/teeth_defaultMat_Normal.webp
+	map_Ks Texture/teeth_defaultMat_Specular.webp
