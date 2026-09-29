@@ -8,6 +8,7 @@ import {
   inject,
   input,
   signal,
+  NgZone,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
@@ -77,6 +78,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private interactionRaycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
   private readonly hotspotStorage = inject(HotspotStorageService);
+  private readonly ngZone = inject(NgZone);
+
+  private lastCameraPos = new THREE.Vector3();
+  private lastCameraQuat = new THREE.Quaternion();
+  private needsHotspotUpdate = true;
 
   constructor() {
     effect(() => {
@@ -87,15 +93,15 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       }
 
       this.loadModel(organ.model);
-    });
+    }, { allowSignalWrites: true });
   }
 
   ngAfterViewInit(): void {
-    this.initScene();
-
-    this.loadModel(this.organ().model);
-
-    this.animate();
+    this.ngZone.runOutsideAngular(() => {
+      this.initScene();
+      this.loadModel(this.organ().model);
+      this.animate();
+    });
   }
 
   private initScene(): void {
@@ -232,6 +238,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       if (!path.toLowerCase().endsWith('.obj') && !path.toLowerCase().endsWith('.mtl')) {
          this.isLoading.set(false);
       }
+      this.needsHotspotUpdate = true;
     };
 
     const onError = (error: unknown) => {
@@ -333,6 +340,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.camera.position.set(0, 0, 4);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
+    this.needsHotspotUpdate = true;
   }
 
   toggleAutoRotate(): void {
@@ -364,7 +372,17 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     if (this.renderer && this.scene && this.camera) {
       this.renderer.render(this.scene, this.camera);
-      this.updateHotspots();
+      
+      const cameraChanged = 
+        this.camera.position.distanceToSquared(this.lastCameraPos) > 0.000001 ||
+        this.camera.quaternion.angleTo(this.lastCameraQuat) > 0.000001;
+
+      if (cameraChanged || this.needsHotspotUpdate) {
+        this.updateHotspots();
+        this.lastCameraPos.copy(this.camera.position);
+        this.lastCameraQuat.copy(this.camera.quaternion);
+        this.needsHotspotUpdate = false;
+      }
     }
   };
 
@@ -463,6 +481,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.camera.updateProjectionMatrix();
 
     this.renderer.setSize(width, height);
+    this.needsHotspotUpdate = true;
   };
 
   private updateMouse(event: PointerEvent): void {
