@@ -21,6 +21,12 @@ import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
 import { Organ, Hotspot } from '../../../core/models/organ.model';
 import { HotspotStorageService } from '../../../core/services/hotspot-storage.service';
 
@@ -75,7 +81,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   private autoRotate = false;
   
-  private interactionRaycaster = new THREE.Raycaster();
+  private interactionRaycaster = (() => {
+    const r = new THREE.Raycaster();
+    (r as any).firstHitOnly = true;
+    return r;
+  })();
   private mouse = new THREE.Vector2();
   private readonly hotspotStorage = inject(HotspotStorageService);
   private readonly ngZone = inject(NgZone);
@@ -83,6 +93,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private lastCameraPos = new THREE.Vector3();
   private lastCameraQuat = new THREE.Quaternion();
   private needsHotspotUpdate = true;
+  private occlusionCache = new Map<string, { blocked: boolean, camPos: THREE.Vector3 }>();
 
   constructor() {
     effect(() => {
@@ -318,6 +329,13 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   private prepareModel(model: THREE.Object3D): void {
+    model.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh && mesh.geometry) {
+        mesh.geometry.computeBoundsTree();
+      }
+    });
+
     model.position.set(0, 0, 0);
     model.rotation.set(0, 0, 0);
     model.scale.set(1, 1, 1);
@@ -386,7 +404,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     }
   };
 
-  private readonly occlusionRaycaster = new THREE.Raycaster();
+  private readonly occlusionRaycaster = (() => {
+    const r = new THREE.Raycaster();
+    (r as any).firstHitOnly = true;
+    return r;
+  })();
 
   private updateHotspots(): void {
     const organ = this.organ();
@@ -431,13 +453,20 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       let isBlocked = false;
       if (isFacingCamera) {
         const camPos = this.camera.position;
-        const dir = worldPosition.clone().sub(camPos).normalize();
-        const dist = camPos.distanceTo(worldPosition);
-        this.occlusionRaycaster.set(camPos, dir);
-        const hits = this.occlusionRaycaster.intersectObject(this.model, true);
-        if (hits.length > 0 && hits[0].distance < dist - 0.03) {
-          isBlocked = true;
+        const cache = this.occlusionCache.get(hotspot.id);
+        
+        if (!cache || cache.camPos.distanceToSquared(camPos) > 0.02) {
+          const dir = worldPosition.clone().sub(camPos).normalize();
+          const dist = camPos.distanceTo(worldPosition);
+          this.occlusionRaycaster.set(camPos, dir);
+          const hits = this.occlusionRaycaster.intersectObject(this.model, true);
+          isBlocked = hits.length > 0 && hits[0].distance < dist - 0.03;
+          this.occlusionCache.set(hotspot.id, { blocked: isBlocked, camPos: camPos.clone() });
+        } else {
+          isBlocked = cache.blocked;
         }
+      } else {
+        this.occlusionCache.delete(hotspot.id);
       }
 
       const projected = worldPosition.clone().project(this.camera);
