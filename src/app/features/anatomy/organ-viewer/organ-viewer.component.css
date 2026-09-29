@@ -529,3 +529,35 @@
     }
   }
 }
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 252, 247, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  color: var(--text);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  gap: 16px;
+  transition: opacity 0.3s ease;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(145, 93, 48, 0.2);
+  border-top-color: #c58b50;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -35,6 +35,13 @@
   </div>
 
   <div #canvasContainer class="viewer-content" (click)="clearHotspot()">
+    @if (isLoading()) {
+      <div class="loading-overlay">
+        <div class="spinner"></div>
+        <span>Loading model...</span>
+      </div>
+    }
+
     <div class="hotspots-overlay">
       @for (hotspot of hotspots2D(); track hotspot.data.id) {
         <div class="hotspot-wrapper"

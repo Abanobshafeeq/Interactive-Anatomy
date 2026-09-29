@@ -60,7 +60,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private pixelCanvas = document.createElement('canvas');
   private pixelCtx = this.pixelCanvas.getContext('2d', { willReadFrequently: true });
 
-  readonly isLoading = input(false);
+  readonly isLoading = signal(false);
 
   readonly hotspots2D = signal<Hotspot2D[]>([]);
   readonly activeHotspot = signal<Hotspot | null>(null);
@@ -179,6 +179,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.model = undefined;
       this.hotspotObjects.clear();
     }
+    this.isLoading.set(true);
 
     const onLoad = (object: THREE.Object3D) => {
       if (requestId !== this.modelRequestId) {
@@ -226,9 +227,15 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.prepareModel(this.model);
       this.scene.add(this.model);
       this.resetCamera();
+      
+      // If it's not an OBJ, textures are already loaded by the GLTFLoader.
+      if (!path.toLowerCase().endsWith('.obj') && !path.toLowerCase().endsWith('.mtl')) {
+         this.isLoading.set(false);
+      }
     };
 
     const onError = (error: unknown) => {
+      this.isLoading.set(false);
       if (requestId !== this.modelRequestId) {
         return;
       }
@@ -258,6 +265,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       manager.onLoad = () => {
         if (this.model && requestId === this.modelRequestId) {
           this.model.visible = true;
+          this.isLoading.set(false);
         }
       };
       
@@ -297,6 +305,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         onError
       );
     } else {
+      this.isLoading.set(false);
       console.error('Unsupported model format:', path);
     }
   }
