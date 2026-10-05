@@ -1,14 +1,16 @@
 import {
   AfterViewInit,
+  ChangeDetectionStrategy,
   Component,
   ElementRef,
+  NgZone,
   OnDestroy,
   ViewChild,
   effect,
   inject,
   input,
   signal,
-  NgZone,
+  untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
@@ -37,16 +39,48 @@ export interface Hotspot2D {
   visible: boolean;
 }
 
+/** Pre-computed world-space anchor of a hotspot (the model is static, so this never changes). */
+interface HotspotAnchor {
+  position: THREE.Vector3;
+  normal: THREE.Vector3;
+}
+
+/** CPU copy of a texture used for colour picking (gum detection). */
+interface TextureSample {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
+type TextureImage = CanvasImageSource & { width: number; height: number };
+
+/** Largest dimension of the CPU texture copy; colour classification doesn't need full resolution. */
+const MAX_TEXTURE_SAMPLE_SIZE = 1024;
+/** Camera has to move this far (squared) before an occlusion raycast is redone. */
+const OCCLUSION_RECHECK_DIST_SQ = 0.02;
+/** Fallback outward-normal origin for hotspots without an explicit normal (model space). */
+const HOTSPOT_FALLBACK_CENTER = new THREE.Vector3(0, 0.45, 0);
+
+function createFirstHitRaycaster(): THREE.Raycaster {
+  const raycaster = new THREE.Raycaster();
+  (raycaster as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly = true;
+  return raycaster;
+}
+
 @Component({
   selector: 'app-organ-viewer',
   standalone: true,
   imports: [FormsModule],
   templateUrl: './organ-viewer.component.html',
   styleUrl: './organ-viewer.component.css',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   @ViewChild('canvasContainer', { static: true })
   private canvasContainer!: ElementRef<HTMLDivElement>;
+
+  @ViewChild('hotspotsOverlay', { static: true })
+  private hotspotsOverlay!: ElementRef<HTMLDivElement>;
 
   readonly organ = input.required<Organ>();
 
@@ -56,16 +90,22 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private controls!: OrbitControls;
 
   private model?: THREE.Object3D;
+  /** The organ whose model is currently loaded / loading. Guards against duplicate loads. */
+  private loadedOrgan?: Organ;
   private animationId = 0;
+  private resizeObserver?: ResizeObserver;
+  private viewWidth = 1;
+  private viewHeight = 1;
 
-  private readonly gltfLoader = new GLTFLoader();
-  private readonly tdsLoader = new TDSLoader();
-  private readonly objLoader = new OBJLoader();
+  // Shared manager so that textures streaming in after the model trigger a re-render.
+  private readonly loadingManager = new THREE.LoadingManager(
+    () => this.requestRender(),
+    () => this.requestRender(),
+  );
+  private readonly gltfLoader = new GLTFLoader(this.loadingManager).setMeshoptDecoder(MeshoptDecoder);
+  private readonly tdsLoader = new TDSLoader(this.loadingManager);
 
   private modelRequestId = 0;
-  
-  private pixelCanvas = document.createElement('canvas');
-  private pixelCtx = this.pixelCanvas.getContext('2d', { willReadFrequently: true });
 
   readonly isLoading = signal(false);
 
@@ -74,43 +114,71 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   readonly placementMode = signal(false);
   readonly pendingHotspot = signal<{ position: THREE.Vector3, normal: THREE.Vector3 } | null>(null);
-  
+
   pendingName = '';
   pendingDescription = '';
   pendingValue: number | undefined;
 
-  private autoRotate = false;
-  
-  private interactionRaycaster = (() => {
-    const r = new THREE.Raycaster();
-    (r as any).firstHitOnly = true;
-    return r;
-  })();
-  private mouse = new THREE.Vector2();
+  /** User's auto-rotate preference; actual rotation is paused while interacting with points. */
+  private readonly autoRotateEnabled = signal(false);
+
   private readonly hotspotStorage = inject(HotspotStorageService);
   private readonly ngZone = inject(NgZone);
 
-  private lastCameraPos = new THREE.Vector3();
-  private lastCameraQuat = new THREE.Quaternion();
+  // Render-on-demand flags: nothing is drawn unless something actually changed.
+  private needsRender = true;
   private needsHotspotUpdate = true;
-  private occlusionCache = new Map<string, { blocked: boolean, camPos: THREE.Vector3 }>();
+
+  // Hotspot state
+  private readonly hotspotAnchors = new Map<string, HotspotAnchor>();
+  private readonly hotspotElements = new Map<string, HTMLElement>();
+  private readonly occlusionCache = new Map<string, { blocked: boolean, camPos: THREE.Vector3 }>();
+
+  // Interaction state
+  private readonly interactionRaycaster = createFirstHitRaycaster();
+  private readonly occlusionRaycaster = createFirstHitRaycaster();
+  private readonly mouse = new THREE.Vector2();
+  private clickableMeshes: Set<string> | null = null;
+  private pendingPointerMove: PointerEvent | null = null;
+  private currentCursor = '';
+  private readonly textureSamples = new WeakMap<object, TextureSample | null>();
+
+  // Scratch objects reused every frame to avoid GC pressure.
+  private readonly tmpViewDir = new THREE.Vector3();
+  private readonly tmpRayDir = new THREE.Vector3();
+  private readonly tmpProjected = new THREE.Vector3();
+  private readonly tmpUv = new THREE.Vector2();
+  private readonly tmpNormalMatrix = new THREE.Matrix3();
 
   constructor() {
     effect(() => {
       const organ = this.organ();
 
-      if (!this.scene) {
-        return;
-      }
+      untracked(() => {
+        // Scene not ready yet (ngAfterViewInit does the first load), or this organ is already loaded.
+        if (!this.scene || organ === this.loadedOrgan) {
+          return;
+        }
 
-      this.loadModel(organ.model);
+        this.ngZone.runOutsideAngular(() => this.loadModel(organ));
+      });
     }, { allowSignalWrites: true });
+
+    // Pause auto-rotate while a hotspot is open or a point is being placed, resume afterwards.
+    effect(() => {
+      const isInteracting = !!this.activeHotspot() || this.placementMode() || !!this.pendingHotspot();
+      const shouldRotate = this.autoRotateEnabled() && !isInteracting;
+
+      if (this.controls) {
+        this.controls.autoRotate = shouldRotate;
+      }
+    });
   }
 
   ngAfterViewInit(): void {
     this.ngZone.runOutsideAngular(() => {
       this.initScene();
-      this.loadModel(this.organ().model);
+      this.loadModel(this.organ());
       this.animate();
     });
   }
@@ -118,11 +186,14 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private initScene(): void {
     const container = this.canvasContainer.nativeElement;
 
+    this.viewWidth = container.clientWidth || 1;
+    this.viewHeight = container.clientHeight || 1;
+
     this.scene = new THREE.Scene();
 
     this.camera = new THREE.PerspectiveCamera(
       45,
-      container.clientWidth / container.clientHeight,
+      this.viewWidth / this.viewHeight,
       0.1,
       1000,
     );
@@ -132,15 +203,14 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
+      powerPreference: 'high-performance',
     });
 
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.setSize(this.viewWidth, this.viewHeight);
 
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-    this.renderer.setAnimationLoop(null);
 
     container.appendChild(this.renderer.domElement);
 
@@ -154,7 +224,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.controls.minDistance = 1.5;
     this.controls.maxDistance = 8;
 
+    this.controls.autoRotateSpeed = 1.5;
+
     this.controls.target.set(0, 0, 0);
+
+    // Fired by controls.update() only when the camera actually moved (incl. damping & auto-rotate).
+    this.controls.addEventListener('change', this.handleControlsChange);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 2);
 
@@ -182,135 +257,78 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     canvas.addEventListener('pointerdown', this.handlePointerDown);
     canvas.addEventListener('pointermove', this.handlePointerMove);
 
-    window.addEventListener('resize', this.handleResize);
+    // Observes the container itself, so layout changes (not just window resizes) are handled.
+    this.resizeObserver = new ResizeObserver(this.handleResize);
+    this.resizeObserver.observe(container);
   }
 
-  private hotspotObjects = new Map<string, THREE.Object3D>();
-
-  private loadModel(path: string): void {
+  private loadModel(organ: Organ): void {
     const requestId = ++this.modelRequestId;
+    const path = organ.model;
+    const lowerPath = path.toLowerCase();
+
+    this.loadedOrgan = organ;
+    this.clickableMeshes = organ.clickableMeshes?.length ? new Set(organ.clickableMeshes) : null;
+
+    this.resetInteractionState();
+    this.clearHotspotState();
 
     if (this.model) {
-      this.disposeModel(this.model);
       this.scene.remove(this.model);
+      this.disposeModel(this.model);
       this.model = undefined;
-      this.hotspotObjects.clear();
     }
-    this.isLoading.set(true);
 
-    const onLoad = (object: THREE.Object3D) => {
+    this.isLoading.set(true);
+    this.requestRender();
+    this.needsHotspotUpdate = true;
+
+    const onLoad = (object: THREE.Object3D, waitForTextures = false) => {
       if (requestId !== this.modelRequestId) {
         this.disposeModel(object);
         return;
       }
 
       this.model = object;
-      
+
+      this.prepareModel(object);
+      this.scene.add(object);
+      this.freezeModel(object);
+
       // Load custom hotspots and merge them
-      const customHotspots = this.hotspotStorage.loadCustomHotspots(this.organ().id);
-      if (!this.organ().hotspots) {
-        this.organ().hotspots = [];
-      }
-      this.organ().hotspots = this.organ().hotspots!.filter(h => !h.isCustom).concat(customHotspots);
+      const customHotspots = this.hotspotStorage.loadCustomHotspots(organ.id);
+      organ.hotspots = (organ.hotspots ?? []).filter(h => !h.isCustom).concat(customHotspots);
 
-      // Attach hotspot dummy objects
-      const hotspots = this.organ().hotspots;
-      if (hotspots) {
-        for (const hotspot of hotspots) {
-          const dummy = new THREE.Object3D();
-          dummy.position.set(hotspot.position.x, hotspot.position.y, hotspot.position.z);
-          if (hotspot.normal) {
-            dummy.userData['normal'] = new THREE.Vector3(
-              hotspot.normal.x,
-              hotspot.normal.y,
-              hotspot.normal.z,
-            ).normalize();
-          } else {
-            // Fallback outward normal relative to model center
-            const center = new THREE.Vector3(0, 0.45, 0);
-            dummy.userData['normal'] = dummy.position.clone().sub(center).normalize();
-          }
-          dummy.userData['isCustom'] = !!hotspot.isCustom;
-          
-          if (hotspot.isCustom) {
-            this.scene.add(dummy);
-          } else {
-            this.model.add(dummy);
-          }
-          this.hotspotObjects.set(hotspot.id, dummy);
-        }
+      for (const hotspot of organ.hotspots) {
+        this.registerHotspot(hotspot);
       }
 
-      this.prepareModel(this.model);
-      this.scene.add(this.model);
       this.resetCamera();
-      
-      // If it's not an OBJ, textures are already loaded by the GLTFLoader.
-      if (!path.toLowerCase().endsWith('.obj') && !path.toLowerCase().endsWith('.mtl')) {
-         this.isLoading.set(false);
+
+      // OBJ + MTL: textures are still streaming in, the loading manager ends the loading state.
+      if (!waitForTextures) {
+        this.isLoading.set(false);
       }
+
+      this.requestRender();
       this.needsHotspotUpdate = true;
     };
 
     const onError = (error: unknown) => {
-      this.isLoading.set(false);
       if (requestId !== this.modelRequestId) {
         return;
       }
+      this.isLoading.set(false);
       console.error('Failed to load anatomy model:', error);
     };
 
-    if (path.toLowerCase().endsWith('.gltf') || path.toLowerCase().endsWith('.glb')) {
-      this.gltfLoader.setMeshoptDecoder(MeshoptDecoder);
-      this.gltfLoader.load(
-        path,
-        (gltf) => onLoad(gltf.scene),
-        undefined,
-        onError
-      );
-    } else if (path.toLowerCase().endsWith('.3ds')) {
-      this.tdsLoader.load(
-        path,
-        onLoad,
-        undefined,
-        onError
-      );
-    } else if (path.toLowerCase().endsWith('.obj')) {
-      const mtlPath = path.substring(0, path.lastIndexOf('.')) + '.mtl';
-      const basePath = path.substring(0, path.lastIndexOf('/') + 1);
-      
-      const manager = new THREE.LoadingManager();
-      manager.onLoad = () => {
-        if (this.model && requestId === this.modelRequestId) {
-          this.model.visible = true;
-          this.isLoading.set(false);
-        }
-      };
-      
-      const mtlLoader = new MTLLoader(manager);
-      mtlLoader.setResourcePath(basePath);
-      
-      mtlLoader.load(
-        mtlPath,
-        (materials) => {
-          materials.preload();
-          // Create a fresh loader to avoid polluting the class singleton
-          import('three/examples/jsm/loaders/OBJLoader.js').then(({ OBJLoader }) => {
-            const loader = new OBJLoader(manager);
-            loader.setMaterials(materials);
-            loader.load(path, (obj) => {
-              obj.visible = false; // Hide until textures are fully loaded
-              onLoad(obj);
-            }, undefined, onError);
-          });
-        },
-        undefined,
-        (error) => {
-          console.warn('Failed to load MTL for OBJ, falling back to geometry only.', error);
-          this.objLoader.load(path, onLoad, undefined, onError);
-        }
-      );
-    } else if (path.toLowerCase().endsWith('.mtl')) {
+    if (lowerPath.endsWith('.gltf') || lowerPath.endsWith('.glb')) {
+      this.gltfLoader.load(path, (gltf) => onLoad(gltf.scene), undefined, onError);
+    } else if (lowerPath.endsWith('.3ds')) {
+      this.tdsLoader.load(path, (object) => onLoad(object), undefined, onError);
+    } else if (lowerPath.endsWith('.obj')) {
+      this.loadObj(path, requestId, onLoad, onError);
+    } else if (lowerPath.endsWith('.mtl')) {
       const mtlLoader = new MTLLoader();
       mtlLoader.load(
         path,
@@ -328,10 +346,59 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  private loadObj(
+    path: string,
+    requestId: number,
+    onLoad: (object: THREE.Object3D, waitForTextures?: boolean) => void,
+    onError: (error: unknown) => void,
+  ): void {
+    const mtlPath = path.substring(0, path.lastIndexOf('.')) + '.mtl';
+    const basePath = path.substring(0, path.lastIndexOf('/') + 1);
+
+    // Dedicated manager so we know when the MTL textures have finished loading.
+    const manager = new THREE.LoadingManager();
+    manager.onProgress = () => this.requestRender();
+    manager.onLoad = () => {
+      if (this.model && requestId === this.modelRequestId) {
+        this.model.visible = true;
+        this.isLoading.set(false);
+        this.requestRender();
+      }
+    };
+
+    const mtlLoader = new MTLLoader(manager);
+    mtlLoader.setResourcePath(basePath);
+
+    mtlLoader.load(
+      mtlPath,
+      (materials) => {
+        if (requestId !== this.modelRequestId) {
+          return;
+        }
+        materials.preload();
+        // Create a fresh loader to avoid polluting a shared instance with these materials
+        const loader = new OBJLoader(manager);
+        loader.setMaterials(materials);
+        loader.load(path, (obj) => {
+          obj.visible = false; // Hide until textures are fully loaded
+          onLoad(obj, true);
+        }, undefined, onError);
+      },
+      undefined,
+      (error) => {
+        if (requestId !== this.modelRequestId) {
+          return;
+        }
+        console.warn('Failed to load MTL for OBJ, falling back to geometry only.', error);
+        new OBJLoader(this.loadingManager).load(path, (obj) => onLoad(obj), undefined, onError);
+      }
+    );
+  }
+
   private prepareModel(model: THREE.Object3D): void {
     model.traverse((child) => {
       const mesh = child as THREE.Mesh;
-      if (mesh.isMesh && mesh.geometry) {
+      if (mesh.isMesh && mesh.geometry && !mesh.geometry.boundsTree) {
         mesh.geometry.computeBoundsTree();
       }
     });
@@ -354,132 +421,247 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * The model never moves after it's been centred (only the camera orbits), so compute its
+   * matrices once and stop three.js from recomputing them for every node on every frame.
+   */
+  private freezeModel(model: THREE.Object3D): void {
+    model.updateMatrixWorld(true);
+    model.traverse((child) => {
+      child.matrixAutoUpdate = false;
+    });
+  }
+
+  /** Converts a hotspot to a world-space anchor once, instead of every frame. */
+  private registerHotspot(hotspot: Hotspot): void {
+    const position = new THREE.Vector3(hotspot.position.x, hotspot.position.y, hotspot.position.z);
+
+    const normal = hotspot.normal
+      ? new THREE.Vector3(hotspot.normal.x, hotspot.normal.y, hotspot.normal.z).normalize()
+      // Fallback outward normal relative to model center
+      : position.clone().sub(HOTSPOT_FALLBACK_CENTER).normalize();
+
+    // Built-in hotspots are authored in model space; custom ones are saved in world space.
+    if (!hotspot.isCustom && this.model) {
+      position.applyMatrix4(this.model.matrixWorld);
+      normal.transformDirection(this.model.matrixWorld);
+    }
+
+    this.hotspotAnchors.set(hotspot.id, { position, normal });
+  }
+
+  private removeHotspotState(id: string): void {
+    this.hotspotAnchors.delete(id);
+    this.hotspotElements.delete(id);
+    this.occlusionCache.delete(id);
+  }
+
+  private clearHotspotState(): void {
+    this.hotspotAnchors.clear();
+    this.hotspotElements.clear();
+    this.occlusionCache.clear();
+  }
+
+  private resetInteractionState(): void {
+    if (this.placementMode()) {
+      this.togglePlacementMode();
+    } else {
+      this.clearHotspot();
+    }
+  }
+
   resetCamera(): void {
+    if (!this.camera || !this.controls) {
+      return;
+    }
     this.camera.position.set(0, 0, 4);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
+    this.requestRender();
     this.needsHotspotUpdate = true;
   }
 
   toggleAutoRotate(): void {
-    this.autoRotate = !this.autoRotate;
-    this.controls.autoRotate = this.autoRotate;
-    this.controls.autoRotateSpeed = 1.5;
+    this.autoRotateEnabled.update(enabled => !enabled);
   }
 
   private disposeModel(model: THREE.Object3D): void {
     model.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) {
         return;
       }
-      object.geometry.dispose();
-      if (Array.isArray(object.material)) {
-        object.material.forEach((material) => material.dispose());
-      } else {
-        object.material.dispose();
+
+      mesh.geometry?.disposeBoundsTree?.();
+      mesh.geometry?.dispose();
+
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) {
+        if (!material) {
+          continue;
+        }
+        // Release every texture referenced by the material (map, normalMap, roughnessMap, ...)
+        for (const value of Object.values(material)) {
+          if (value instanceof THREE.Texture) {
+            value.dispose();
+            const image = value.image;
+            if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
+              image.close();
+            }
+          }
+        }
+        material.dispose();
       }
     });
   }
 
+  private requestRender(): void {
+    this.needsRender = true;
+  }
+
+  private handleControlsChange = (): void => {
+    this.needsRender = true;
+    this.needsHotspotUpdate = true;
+  };
+
   private animate = (): void => {
     this.animationId = requestAnimationFrame(this.animate);
 
-    if (this.controls) {
-      this.controls.update();
+    // Pointer moves are coalesced to at most one raycast per frame.
+    if (this.pendingPointerMove) {
+      const event = this.pendingPointerMove;
+      this.pendingPointerMove = null;
+      this.processPointerMove(event);
     }
 
-    if (this.renderer && this.scene && this.camera) {
-      this.renderer.render(this.scene, this.camera);
-      
-      const cameraChanged = 
-        this.camera.position.distanceToSquared(this.lastCameraPos) > 0.000001 ||
-        this.camera.quaternion.angleTo(this.lastCameraQuat) > 0.000001;
+    // Must run every frame for damping / auto-rotate; emits 'change' only when the camera moves.
+    this.controls.update();
 
-      if (cameraChanged || this.needsHotspotUpdate) {
-        this.updateHotspots();
-        this.lastCameraPos.copy(this.camera.position);
-        this.lastCameraQuat.copy(this.camera.quaternion);
-        this.needsHotspotUpdate = false;
-      }
+    if (this.needsRender) {
+      this.needsRender = false;
+      this.renderer.render(this.scene, this.camera);
+    }
+
+    if (this.needsHotspotUpdate) {
+      this.needsHotspotUpdate = false;
+      this.updateHotspots();
     }
   };
 
-  private readonly occlusionRaycaster = (() => {
-    const r = new THREE.Raycaster();
-    (r as any).firstHitOnly = true;
-    return r;
-  })();
-
+  /**
+   * Projects hotspots to screen space.
+   * Positions are written straight to the DOM every frame; the `hotspots2D` signal is only
+   * updated when the list or a hotspot's visibility changes, so camera movement doesn't
+   * trigger Angular change detection on every frame.
+   */
   private updateHotspots(): void {
-    const organ = this.organ();
-    if (!organ.hotspots || !this.model || !this.camera || !this.renderer) {
+    const hotspots = this.loadedOrgan?.hotspots;
+    if (!hotspots?.length || !this.model) {
       if (this.hotspots2D().length > 0) {
         this.hotspots2D.set([]);
       }
       return;
     }
 
-    const container = this.canvasContainer.nativeElement;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = this.viewWidth;
+    const height = this.viewHeight;
+    const camPos = this.camera.position;
 
-    const newHotspots2D: Hotspot2D[] = [];
+    const previous = this.hotspots2D();
+    const next: Hotspot2D[] = [];
+    let changed = false;
 
-    const tempQuat = new THREE.Quaternion();
-    const modelQuat = this.model.getWorldQuaternion(tempQuat);
+    for (const hotspot of hotspots) {
+      const anchor = this.hotspotAnchors.get(hotspot.id);
+      if (!anchor) continue;
 
-    for (const hotspot of organ.hotspots) {
-      const dummy = this.hotspotObjects.get(hotspot.id);
-      if (!dummy) continue;
-
-      const worldPosition = new THREE.Vector3();
-      dummy.getWorldPosition(worldPosition);
+      const worldPosition = anchor.position;
 
       // 1. Check if surface normal faces camera
-      const localNormal = dummy.userData['normal'] as THREE.Vector3 | undefined;
-      let isFacingCamera = true;
-      if (localNormal) {
-        let worldNormal: THREE.Vector3;
-        if (dummy.userData['isCustom']) {
-           worldNormal = localNormal.clone();
-        } else {
-           worldNormal = localNormal.clone().applyQuaternion(modelQuat);
-        }
-        const viewDir = this.camera.position.clone().sub(worldPosition).normalize();
-        isFacingCamera = worldNormal.dot(viewDir) > 0.05;
-      }
+      const viewDir = this.tmpViewDir.subVectors(camPos, worldPosition);
+      const distance = viewDir.length();
+      const isFacingCamera = distance > 0 && anchor.normal.dot(viewDir) / distance > 0.05;
 
-      // 2. Line-of-sight raycast: detect if organ tissue blocks the view
-      let isBlocked = false;
-      if (isFacingCamera) {
-        const camPos = this.camera.position;
-        const cache = this.occlusionCache.get(hotspot.id);
-        
-        if (!cache || cache.camPos.distanceToSquared(camPos) > 0.02) {
-          const dir = worldPosition.clone().sub(camPos).normalize();
-          const dist = camPos.distanceTo(worldPosition);
-          this.occlusionRaycaster.set(camPos, dir);
-          const hits = this.occlusionRaycaster.intersectObject(this.model, true);
-          isBlocked = hits.length > 0 && hits[0].distance < dist - 0.03;
-          this.occlusionCache.set(hotspot.id, { blocked: isBlocked, camPos: camPos.clone() });
-        } else {
-          isBlocked = cache.blocked;
-        }
-      } else {
-        this.occlusionCache.delete(hotspot.id);
-      }
-
-      const projected = worldPosition.clone().project(this.camera);
+      // 2. Project to screen space and check the frustum
+      const projected = this.tmpProjected.copy(worldPosition).project(this.camera);
 
       const x = (projected.x * 0.5 + 0.5) * width;
       const y = (-projected.y * 0.5 + 0.5) * height;
       const inFrustum = projected.z < 1 && projected.z > -1;
-      const visible = inFrustum && isFacingCamera && !isBlocked;
 
-      newHotspots2D.push({ data: hotspot, x, y, visible });
+      // 3. Line-of-sight raycast: only when the hotspot could actually be visible
+      let isBlocked = false;
+      if (isFacingCamera && inFrustum) {
+        isBlocked = this.isOccluded(hotspot.id, worldPosition, distance);
+      } else {
+        this.occlusionCache.delete(hotspot.id);
+      }
+
+      const visible = isFacingCamera && inFrustum && !isBlocked;
+
+      const old = previous[next.length];
+      if (!old || old.data !== hotspot || old.visible !== visible) {
+        changed = true;
+      }
+
+      next.push({ data: hotspot, x, y, visible });
+
+      if (visible) {
+        const element = this.getHotspotElement(hotspot.id);
+        if (element) {
+          element.style.left = `${x}px`;
+          element.style.top = `${y}px`;
+        }
+      }
     }
 
-    this.hotspots2D.set(newHotspots2D);
+    if (changed || next.length !== previous.length) {
+      this.hotspots2D.set(next);
+    }
+  }
+
+  /** Detects if organ tissue blocks the view between the camera and a hotspot (cached). */
+  private isOccluded(id: string, target: THREE.Vector3, distance: number): boolean {
+    const camPos = this.camera.position;
+    const cached = this.occlusionCache.get(id);
+
+    if (cached && cached.camPos.distanceToSquared(camPos) <= OCCLUSION_RECHECK_DIST_SQ) {
+      return cached.blocked;
+    }
+
+    const dir = this.tmpRayDir.subVectors(target, camPos).divideScalar(distance);
+    this.occlusionRaycaster.set(camPos, dir);
+    // Only geometry between the camera and the hotspot matters (small bias avoids self-hits).
+    this.occlusionRaycaster.far = Math.max(0, distance - 0.03);
+    const blocked = this.occlusionRaycaster.intersectObject(this.model!, true).length > 0;
+
+    if (cached) {
+      cached.blocked = blocked;
+      cached.camPos.copy(camPos);
+    } else {
+      this.occlusionCache.set(id, { blocked, camPos: camPos.clone() });
+    }
+
+    return blocked;
+  }
+
+  private getHotspotElement(id: string): HTMLElement | null {
+    const cached = this.hotspotElements.get(id);
+    if (cached?.isConnected) {
+      return cached;
+    }
+
+    const element = this.hotspotsOverlay.nativeElement.querySelector<HTMLElement>(
+      `[data-hotspot-id="${CSS.escape(id)}"]`,
+    );
+
+    if (element) {
+      this.hotspotElements.set(id, element);
+    } else {
+      this.hotspotElements.delete(id);
+    }
+
+    return element;
   }
 
   selectHotspot(hotspot: Hotspot): void {
@@ -501,90 +683,102 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     const height = container.clientHeight;
 
-    if (!width || !height) {
+    if (!width || !height || (width === this.viewWidth && height === this.viewHeight)) {
       return;
     }
+
+    this.viewWidth = width;
+    this.viewHeight = height;
 
     this.camera.aspect = width / height;
 
     this.camera.updateProjectionMatrix();
 
     this.renderer.setSize(width, height);
+
+    // Resizing clears the drawing buffer: draw immediately to avoid a blank frame.
+    this.renderer.render(this.scene, this.camera);
+    this.needsRender = false;
     this.needsHotspotUpdate = true;
   };
 
   private updateMouse(event: PointerEvent): void {
-    const container = this.canvasContainer.nativeElement;
-    const rect = container.getBoundingClientRect();
-    this.mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
-    this.mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
+    const rect = this.canvasContainer.nativeElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  }
+
+  /** Raycasts the pointer against the model, honouring `clickableMeshes` and gum filtering. */
+  private pickSurface(event: PointerEvent): THREE.Intersection | undefined {
+    if (!this.model) {
+      return undefined;
+    }
+
+    this.updateMouse(event);
+    this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.interactionRaycaster.intersectObject(this.model, true);
+
+    const allowed = this.clickableMeshes;
+    if (!allowed) {
+      return intersects[0];
+    }
+
+    // If clickableMeshes is defined, we also perform texture-based filtering for gums
+    return intersects.find(i => allowed.has(i.object.name) && !this.checkIsGum(i));
   }
 
   private handlePointerMove = (event: PointerEvent): void => {
     if (this.placementMode()) {
-      this.updateMouse(event);
-      this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
-      const intersects = this.interactionRaycaster.intersectObject(this.model!, true);
-      const container = this.canvasContainer.nativeElement;
-      
-      let hasValidHit = false;
-      const allowed = this.organ().clickableMeshes;
-      if (allowed && allowed.length > 0) {
-        // If clickableMeshes is defined, we also perform texture-based filtering for gums
-        const hit = intersects.find(i => allowed.includes(i.object.name) && !this.checkIsGum(i));
-        hasValidHit = !!hit;
-      } else {
-        hasValidHit = intersects.length > 0;
-      }
-
-      if (hasValidHit) {
-        container.style.cursor = 'crosshair';
-      } else {
-        container.style.cursor = 'default';
-      }
+      this.pendingPointerMove = event;
     }
   };
+
+  private processPointerMove(event: PointerEvent): void {
+    if (!this.placementMode()) {
+      return;
+    }
+    this.setCursor(this.pickSurface(event) ? 'crosshair' : 'default');
+  }
+
+  private setCursor(cursor: string): void {
+    if (cursor === this.currentCursor) {
+      return;
+    }
+    this.currentCursor = cursor;
+    this.canvasContainer.nativeElement.style.cursor = cursor;
+  }
 
   private handlePointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return; // Only left click
-    
+
     // Only proceed if clicking on the canvas directly
     if (event.target !== this.renderer.domElement) return;
 
-    if (this.placementMode()) {
-      if (this.pendingHotspot()) return; // Wait until current point is handled
+    if (!this.placementMode()) return;
+    if (this.pendingHotspot()) return; // Wait until current point is handled
 
-      this.updateMouse(event);
-      this.interactionRaycaster.setFromCamera(this.mouse, this.camera);
-      const intersects = this.interactionRaycaster.intersectObject(this.model!, true);
-      
-      let hit: THREE.Intersection | undefined;
-      const allowed = this.organ().clickableMeshes;
-      if (allowed && allowed.length > 0) {
-        hit = intersects.find(i => allowed.includes(i.object.name) && !this.checkIsGum(i));
-      } else {
-        hit = intersects.length > 0 ? intersects[0] : undefined;
-      }
+    const hit = this.pickSurface(event);
+    if (!hit?.face) return;
 
-      if (hit && hit.face) {
-        // Use world space position directly from raycaster
-        const point = hit.point.clone(); 
-        // Extract normal in world space
-        const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-        const worldNormal = hit.face.normal.clone().applyMatrix3(normalMatrix).normalize();
-        
-        this.pendingHotspot.set({ position: point, normal: worldNormal });
-      }
-    }
+    // Use world space position directly from raycaster
+    const point = hit.point.clone();
+    // Extract normal in world space
+    this.tmpNormalMatrix.getNormalMatrix(hit.object.matrixWorld);
+    const worldNormal = hit.face.normal.clone().applyMatrix3(this.tmpNormalMatrix).normalize();
+
+    this.pendingHotspot.set({ position: point, normal: worldNormal });
   };
-  
+
   togglePlacementMode(): void {
     const isPlacing = !this.placementMode();
     this.placementMode.set(isPlacing);
-    this.controls.enabled = !isPlacing; // Disable camera rotation while placing
+    if (this.controls) {
+      this.controls.enabled = !isPlacing; // Disable camera rotation while placing
+    }
     if (!isPlacing) {
       this.cancelPlacement();
-      this.canvasContainer.nativeElement.style.cursor = 'default';
+      this.pendingPointerMove = null;
+      this.setCursor('default');
     }
     this.clearHotspot();
   }
@@ -598,7 +792,8 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   confirmPlacement(): void {
     const data = this.pendingHotspot();
-    if (!data || !this.pendingName.trim()) return;
+    const organ = this.loadedOrgan;
+    if (!data || !organ || !this.pendingName.trim()) return;
 
     const newHotspot: Hotspot = {
       id: `custom-${Date.now()}`,
@@ -610,39 +805,42 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       isCustom: true
     };
 
-    if (!this.organ().hotspots) {
-      this.organ().hotspots = [];
-    }
-    
     // Update active model array
-    this.organ().hotspots!.push(newHotspot);
-    
+    (organ.hotspots ??= []).push(newHotspot);
+
     // Persist
-    this.hotspotStorage.saveCustomHotspots(this.organ().id, this.organ().hotspots!);
-    
-    // Reload model to inject the new mesh
-    this.loadModel(this.organ().model);
+    this.hotspotStorage.saveCustomHotspots(organ.id, organ.hotspots);
+
+    // Register the new point directly; no need to reload the whole model
+    this.registerHotspot(newHotspot);
+    this.needsHotspotUpdate = true;
 
     this.togglePlacementMode(); // Exit mode
   }
 
   deleteHotspot(id: string): void {
-    if (!this.organ().hotspots) return;
-    
+    const organ = this.loadedOrgan;
+    if (!organ?.hotspots) return;
+
     // Remove from array
-    this.organ().hotspots = this.organ().hotspots!.filter(h => h.id !== id);
-    
+    organ.hotspots = organ.hotspots.filter(h => h.id !== id);
+
     // Save to storage
-    this.hotspotStorage.saveCustomHotspots(this.organ().id, this.organ().hotspots!);
-    
+    this.hotspotStorage.saveCustomHotspots(organ.id, organ.hotspots);
+
+    // Drop cached state for the point; no need to reload the whole model
+    this.removeHotspotState(id);
+    this.needsHotspotUpdate = true;
+
     this.clearHotspot();
-    
-    // Reload model to remove the mesh
-    this.loadModel(this.organ().model);
   }
 
   ngOnDestroy(): void {
     cancelAnimationFrame(this.animationId);
+
+    ++this.modelRequestId;
+
+    this.resizeObserver?.disconnect();
 
     const canvas = this.renderer?.domElement;
     if (canvas) {
@@ -650,54 +848,87 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       canvas.removeEventListener('pointermove', this.handlePointerMove);
     }
 
-    window.removeEventListener('resize', this.handleResize);
-
-    ++this.modelRequestId;
+    this.controls?.removeEventListener('change', this.handleControlsChange);
+    this.controls?.dispose();
 
     if (this.model) {
       this.disposeModel(this.model);
+      this.model = undefined;
     }
 
-    this.controls?.dispose();
+    this.clearHotspotState();
 
-    this.renderer?.dispose();
+    if (this.renderer) {
+      this.renderer.dispose();
+      // Free the WebGL context right away (browsers cap the number of live contexts)
+      this.renderer.forceContextLoss();
+      canvas?.remove();
+    }
   }
 
   private checkIsGum(hit: THREE.Intersection): boolean {
-    if (!hit.uv || !this.pixelCtx) return false;
-    
+    if (!hit.uv) return false;
+
     const mesh = hit.object as THREE.Mesh;
-    const material = mesh.material as any;
-    const mat = Array.isArray(material) ? material[0] : material;
-    
-    if (mat && mat.map && mat.map.image) {
-      const img = mat.map.image;
-      if (!img.width || !img.height) return false;
-      
-      this.pixelCanvas.width = 1;
-      this.pixelCanvas.height = 1;
-      
-      const x = Math.floor(hit.uv.x * img.width);
-      // UV y is inverted for WebGL textures usually
-      const y = Math.floor((1 - hit.uv.y) * img.height);
-      
+    const material = Array.isArray(mesh.material)
+      ? mesh.material[hit.face?.materialIndex ?? 0]
+      : mesh.material;
+    const texture = (material as THREE.MeshStandardMaterial | undefined)?.map;
+    const image = texture?.image as unknown as TextureImage | undefined;
+    if (!texture || !image) return false;
+
+    const sample = this.getTextureSample(image);
+    if (!sample) return false;
+
+    // Applies the texture's offset/repeat/wrapping and flipY (UV y is inverted for most WebGL textures)
+    const uv = texture.transformUv(this.tmpUv.copy(hit.uv));
+    const x = Math.min(sample.width - 1, Math.max(0, Math.floor(uv.x * sample.width)));
+    const y = Math.min(sample.height - 1, Math.max(0, Math.floor(uv.y * sample.height)));
+
+    const index = (y * sample.width + x) * 4;
+    const r = sample.data[index];
+    const g = sample.data[index + 1];
+    const b = sample.data[index + 2];
+
+    // Gums and tongue are pink/red. Teeth are white/yellow.
+    // Pink means red is significantly higher than green and blue.
+    return r > g + 25 && r > b + 25 && g < 180; // true = Rejected as Gum
+  }
+
+  /**
+   * Reads a texture back to the CPU once and caches it, so picking is a plain array lookup
+   * instead of a GPU readback (drawImage + getImageData) on every pointer move.
+   */
+  private getTextureSample(image: TextureImage): TextureSample | null {
+    const cached = this.textureSamples.get(image);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    let sample: TextureSample | null = null;
+
+    if (image.width && image.height) {
+      const scale = Math.min(1, MAX_TEXTURE_SAMPLE_SIZE / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
       try {
-        this.pixelCtx.drawImage(img, x, y, 1, 1, 0, 0, 1, 1);
-        const data = this.pixelCtx.getImageData(0, 0, 1, 1).data;
-        
-        const r = data[0];
-        const g = data[1];
-        const b = data[2];
-        
-        // Gums and tongue are pink/red. Teeth are white/yellow.
-        // Pink means red is significantly higher than green and blue.
-        if (r > g + 25 && r > b + 25 && g < 180) {
-          return true; // Rejected as Gum
+        if (ctx) {
+          ctx.drawImage(image, 0, 0, width, height);
+          sample = { data: ctx.getImageData(0, 0, width, height).data, width, height };
         }
-      } catch (e) {
+      } catch {
         // Tainted canvas or draw error, fail gracefully
+        sample = null;
       }
     }
-    return false;
+
+    this.textureSamples.set(image, sample);
+    return sample;
   }
 }

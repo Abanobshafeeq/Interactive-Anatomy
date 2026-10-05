@@ -42,9 +42,10 @@
       </div>
     }
 
-    <div class="hotspots-overlay">
+    <div #hotspotsOverlay class="hotspots-overlay">
       @for (hotspot of hotspots2D(); track hotspot.data.id) {
         <div class="hotspot-wrapper"
+             [attr.data-hotspot-id]="hotspot.data.id"
              [style.left.px]="hotspot.x"
              [style.top.px]="hotspot.y"
              [class.hidden]="!hotspot.visible"
