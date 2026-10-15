@@ -560,3 +560,420 @@
     transform: rotate(360deg);
   }
 }
+
+/* ==========================================================================
+   Dental Hover Badge & 4-Quadrant Color Mapping Panel
+   ========================================================================== */
+
+.tooth-hover-badge {
+  position: absolute;
+  z-index: 90;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(35, 28, 24, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  transform: translate(0, 0);
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.tooth-hover-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tooth-hover-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4da6ff;
+  box-shadow: 0 0 8px #4da6ff;
+}
+
+.tooth-hover-num {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+}
+
+.tooth-hover-arch {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #d1d5db;
+}
+
+.tooth-hover-name {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+}
+
+.tooth-hover-hint {
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+/* Tooth Mapping Drawer / Inspector Panel */
+.tooth-mapping-panel {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  width: 340px;
+  max-width: calc(100% - 40px);
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+  z-index: 100;
+  background: rgba(255, 252, 248, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(117, 91, 70, 0.22);
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow:
+    0 20px 40px rgba(50, 36, 26, 0.18),
+    0 1px 2px rgba(255, 255, 255, 0.8) inset;
+  animation: panel-slide-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes panel-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.mapping-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(117, 91, 70, 0.12);
+}
+
+.tooth-badge-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tooth-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #2f2a27;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.tooth-info-meta h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #2f2a27;
+  line-height: 1.2;
+}
+
+.tooth-sub {
+  font-size: 11px;
+  color: #8d847c;
+  display: block;
+  margin-top: 2px;
+}
+
+.close-panel-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #8d847c;
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.close-panel-btn:hover {
+  background: rgba(117, 91, 70, 0.1);
+  color: #2f2a27;
+}
+
+.mapping-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 8px;
+}
+
+.mapping-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6a615a;
+}
+
+.select-all-btn {
+  background: transparent;
+  border: 1px solid rgba(117, 91, 70, 0.2);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #2f2a27;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+
+.select-all-btn:hover {
+  background: rgba(117, 91, 70, 0.1);
+  border-color: rgba(117, 91, 70, 0.35);
+}
+
+/* 4 Quadrants Grid */
+.quadrants-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.quadrant-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1.5px solid rgba(117, 91, 70, 0.15);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.quadrant-card:hover {
+  background: #ffffff;
+  border-color: rgba(117, 91, 70, 0.35);
+  transform: translateY(-1px);
+}
+
+.quadrant-card.selected {
+  border-color: #2f2a27;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(47, 42, 39, 0.1);
+}
+
+.quadrant-color-bar {
+  height: 8px;
+  width: 100%;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  margin-bottom: 6px;
+}
+
+.quadrant-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quadrant-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8d847c;
+  letter-spacing: 0.04em;
+}
+
+.quadrant-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #2f2a27;
+}
+
+.quadrant-shade-name {
+  font-size: 10.5px;
+  color: #7a7067;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quadrant-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #ffffff;
+  background: #8d847c;
+  opacity: 0.2;
+  transition: 0.15s ease;
+}
+
+.quadrant-check.active {
+  background: #2f2a27;
+  opacity: 1;
+}
+
+/* Shade Presets Palette */
+.shades-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.shade-chip-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(117, 91, 70, 0.15);
+  background: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shade-chip-btn:hover {
+  background: #ffffff;
+  border-color: #2f2a27;
+  transform: translateY(-1px);
+}
+
+.shade-color-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.shade-code {
+  font-size: 10px;
+  font-weight: 600;
+  color: #2f2a27;
+}
+
+/* Custom Color Input */
+.custom-color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(117, 91, 70, 0.15);
+  margin-bottom: 12px;
+}
+
+.custom-color-row label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f2a27;
+}
+
+.color-picker-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-picker-input-wrap input[type="color"] {
+  -webkit-appearance: none;
+  border: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+}
+
+.color-picker-input-wrap input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-picker-input-wrap input[type="color"]::-webkit-color-swatch {
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 50%;
+}
+
+.hex-text {
+  font-size: 11px;
+  font-family: monospace;
+  color: #6a615a;
+  font-weight: 600;
+}
+
+/* Actions Row */
+.mapping-actions {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid rgba(117, 91, 70, 0.12);
+  padding-top: 12px;
+}
+
+.reset-tooth-action {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(117, 91, 70, 0.25);
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #2f2a27;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+
+.reset-tooth-action:hover {
+  background: #fff;
+  border-color: #2f2a27;
+}
+
+.reset-all-action {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(235, 124, 107, 0.35);
+  background: rgba(235, 124, 107, 0.1);
+  font-size: 11px;
+  font-weight: 600;
+  color: #c74d3c;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+
+.reset-all-action:hover {
+  background: rgba(235, 124, 107, 0.2);
+  border-color: #c74d3c;
+}

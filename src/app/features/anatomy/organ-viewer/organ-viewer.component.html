@@ -122,6 +122,145 @@
         </div>
       }
     </div>
+
+    <!-- Dental Hover Badge: Displays Tooth Number and Name on hover -->
+    @if (hoveredTooth(); as tooth) {
+      <div class="tooth-hover-badge" [style.left.px]="tooth.x + 14" [style.top.px]="tooth.y - 20">
+        <div class="tooth-hover-header">
+          <span class="tooth-hover-dot"></span>
+          <span class="tooth-hover-num">Tooth #{{ tooth.number }}</span>
+          <span class="tooth-hover-arch">{{ tooth.isUpper ? 'Upper' : 'Lower' }}</span>
+        </div>
+        <span class="tooth-hover-name">{{ tooth.name }}</span>
+        <span class="tooth-hover-hint">Click tooth to breakdown into 4 quadrants</span>
+      </div>
+    }
+
+    <!-- Dental Tooth Structure Breakdown & 4-Quadrant Color Mapping Panel -->
+    @if (selectedTooth(); as tooth) {
+      <div class="tooth-mapping-panel" (click)="$event.stopPropagation()">
+        <div class="mapping-panel-header">
+          <div class="tooth-badge-header">
+            <span class="tooth-pill">Tooth #{{ tooth.number }}</span>
+            <div class="tooth-info-meta">
+              <h3>{{ tooth.name }}</h3>
+              <span class="tooth-sub">{{ tooth.isUpper ? 'Upper Arch' : 'Lower Arch' }} · {{ tooth.type }}</span>
+            </div>
+          </div>
+          <button type="button" class="close-panel-btn" (click)="closeToothPanel()" title="Close panel">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Section 1: 4 Quadrants Selection -->
+        <div class="mapping-section-header">
+          <span class="mapping-title">White Enamel Structure (4 Quadrants)</span>
+          <button type="button" class="select-all-btn" (click)="selectAllQuadrants()">Select All 4</button>
+        </div>
+
+        <div class="quadrants-grid">
+          <!-- Quadrant 1 (Top-Left) -->
+          <button type="button"
+                  class="quadrant-card"
+                  [class.selected]="selectedQuadrants().has('q1')"
+                  (click)="toggleQuadrant('q1')">
+            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q1') || '#FAF9F5'"></div>
+            <div class="quadrant-body">
+              <span class="quadrant-tag">Q1</span>
+              <span class="quadrant-label">Top-Left</span>
+              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q1') }}</span>
+            </div>
+            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q1')">✓</span>
+          </button>
+
+          <!-- Quadrant 2 (Top-Right) -->
+          <button type="button"
+                  class="quadrant-card"
+                  [class.selected]="selectedQuadrants().has('q2')"
+                  (click)="toggleQuadrant('q2')">
+            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q2') || '#FAF9F5'"></div>
+            <div class="quadrant-body">
+              <span class="quadrant-tag">Q2</span>
+              <span class="quadrant-label">Top-Right</span>
+              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q2') }}</span>
+            </div>
+            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q2')">✓</span>
+          </button>
+
+          <!-- Quadrant 3 (Bottom-Left) -->
+          <button type="button"
+                  class="quadrant-card"
+                  [class.selected]="selectedQuadrants().has('q3')"
+                  (click)="toggleQuadrant('q3')">
+            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q3') || '#FAF9F5'"></div>
+            <div class="quadrant-body">
+              <span class="quadrant-tag">Q3</span>
+              <span class="quadrant-label">Bottom-Left</span>
+              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q3') }}</span>
+            </div>
+            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q3')">✓</span>
+          </button>
+
+          <!-- Quadrant 4 (Bottom-Right) -->
+          <button type="button"
+                  class="quadrant-card"
+                  [class.selected]="selectedQuadrants().has('q4')"
+                  (click)="toggleQuadrant('q4')">
+            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q4') || '#FAF9F5'"></div>
+            <div class="quadrant-body">
+              <span class="quadrant-tag">Q4</span>
+              <span class="quadrant-label">Bottom-Right</span>
+              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q4') }}</span>
+            </div>
+            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q4')">✓</span>
+          </button>
+        </div>
+
+        <!-- Section 2: Dental Shade & Color Application -->
+        <div class="mapping-section-header">
+          <span class="mapping-title">Apply Color to Selected Quadrant(s)</span>
+        </div>
+
+        <div class="shades-palette-grid">
+          @for (preset of shadePresets; track preset.code) {
+            <button type="button"
+                    class="shade-chip-btn"
+                    [title]="preset.name"
+                    (click)="applyColorToSelectedQuadrants(preset.hex)">
+              <span class="shade-color-circle" [style.background-color]="preset.hex"></span>
+              <span class="shade-code">{{ preset.code }}</span>
+            </button>
+          }
+        </div>
+
+        <!-- Custom Color Picker Row -->
+        <div class="custom-color-row">
+          <label for="customToothColor">Custom Color:</label>
+          <div class="color-picker-input-wrap">
+            <input id="customToothColor"
+                   type="color"
+                   [ngModel]="activeColor()"
+                   (ngModelChange)="applyColorToSelectedQuadrants($event)" />
+            <span class="hex-text">{{ activeColor() }}</span>
+          </div>
+        </div>
+
+        <!-- Actions Row -->
+        <div class="mapping-actions">
+          <button type="button" class="reset-tooth-action" (click)="resetCurrentTooth()">
+            Reset Tooth #{{ tooth.number }}
+          </button>
+          @if (toothColors().size > 0) {
+            <button type="button" class="reset-all-action" (click)="resetAllTeeth()">
+              Reset All Teeth
+            </button>
+          }
+        </div>
+      </div>
+    }
   </div>
 
   <!-- <div class="viewer-pedestal">

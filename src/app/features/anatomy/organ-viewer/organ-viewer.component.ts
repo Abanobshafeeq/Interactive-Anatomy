@@ -31,6 +31,14 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 import { Organ, Hotspot } from '../../../core/models/organ.model';
 import { HotspotStorageService } from '../../../core/services/hotspot-storage.service';
+import {
+  ToothData,
+  ToothQuadrant,
+  ToothQuadrantColors,
+  DENTAL_SHADE_PRESETS,
+  DentalShadePreset,
+} from '../../../core/models/dental.model';
+import { DentalService } from '../../../core/services/dental.service';
 
 export interface Hotspot2D {
   data: Hotspot;
@@ -123,7 +131,25 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private readonly autoRotateEnabled = signal(false);
 
   private readonly hotspotStorage = inject(HotspotStorageService);
+  private readonly dentalService = inject(DentalService);
   private readonly ngZone = inject(NgZone);
+
+  // Dental interactive state
+  readonly hoveredTooth = signal<{
+    number: number;
+    name: string;
+    type: string;
+    isUpper: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  readonly selectedTooth = signal<ToothData | null>(null);
+  readonly selectedQuadrants = signal<Set<ToothQuadrant>>(new Set(['q1', 'q2', 'q3', 'q4']));
+  readonly activeColor = signal<string>('#E6DCBF');
+  readonly toothColors = signal<Map<number, ToothQuadrantColors>>(new Map());
+  readonly shadePresets = DENTAL_SHADE_PRESETS;
+  private pointerDownCoord = { x: 0, y: 0, time: 0 };
 
   // Render-on-demand flags: nothing is drawn unless something actually changed.
   private needsRender = true;
@@ -255,7 +281,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener('pointerdown', this.handlePointerDown);
+    canvas.addEventListener('pointerup', this.handlePointerUp);
     canvas.addEventListener('pointermove', this.handlePointerMove);
+    canvas.addEventListener('pointerleave', this.handlePointerLeave);
 
     // Observes the container itself, so layout changes (not just window resizes) are handled.
     this.resizeObserver = new ResizeObserver(this.handleResize);
@@ -362,6 +390,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       if (this.model && requestId === this.modelRequestId) {
         this.model.visible = true;
         this.isLoading.set(false);
+        if (this.isDentalModel()) {
+          this.updateMeshVertexColors();
+        }
         this.requestRender();
       }
     };
@@ -376,6 +407,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
           return;
         }
         materials.preload();
+        for (const mat of Object.values(materials.materials)) {
+          mat.vertexColors = true;
+        }
         // Create a fresh loader to avoid polluting a shared instance with these materials
         const loader = new OBJLoader(manager);
         loader.setMaterials(materials);
@@ -398,8 +432,24 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private prepareModel(model: THREE.Object3D): void {
     model.traverse((child) => {
       const mesh = child as THREE.Mesh;
-      if (mesh.isMesh && mesh.geometry && !mesh.geometry.boundsTree) {
-        mesh.geometry.computeBoundsTree();
+      if (mesh.isMesh && mesh.geometry) {
+        if (!mesh.geometry.attributes['color']) {
+          const count = mesh.geometry.attributes['position'].count;
+          const colors = new Float32Array(count * 3).fill(1.0);
+          mesh.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        }
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((m) => {
+            m.vertexColors = true;
+            m.needsUpdate = true;
+          });
+        } else if (mesh.material) {
+          mesh.material.vertexColors = true;
+          mesh.material.needsUpdate = true;
+        }
+        if (!mesh.geometry.boundsTree) {
+          mesh.geometry.computeBoundsTree();
+        }
       }
     });
 
@@ -463,6 +513,8 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   private resetInteractionState(): void {
+    this.hoveredTooth.set(null);
+    this.selectedTooth.set(null);
     if (this.placementMode()) {
       this.togglePlacementMode();
     } else {
@@ -728,16 +780,50 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   private handlePointerMove = (event: PointerEvent): void => {
-    if (this.placementMode()) {
+    if (this.placementMode() || this.isDentalModel()) {
       this.pendingPointerMove = event;
     }
   };
 
   private processPointerMove(event: PointerEvent): void {
-    if (!this.placementMode()) {
+    if (this.placementMode()) {
+      this.setCursor(this.pickSurface(event) ? 'crosshair' : 'default');
+      if (this.hoveredTooth()) {
+        this.ngZone.run(() => this.hoveredTooth.set(null));
+      }
       return;
     }
-    this.setCursor(this.pickSurface(event) ? 'crosshair' : 'default');
+
+    if (this.isDentalModel()) {
+      const hit = this.pickSurface(event);
+      if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059')) {
+        const isUpper = hit.object.name === 'Group1059';
+        const localPt = hit.object.worldToLocal(hit.point.clone());
+        const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper);
+
+        const rect = this.canvasContainer.nativeElement.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        this.setCursor('pointer');
+        this.ngZone.run(() => {
+          this.hoveredTooth.set({
+            number: tooth.number,
+            name: tooth.name,
+            type: tooth.type,
+            isUpper: tooth.isUpper,
+            x,
+            y,
+          });
+        });
+        return;
+      } else {
+        if (this.hoveredTooth()) {
+          this.ngZone.run(() => this.hoveredTooth.set(null));
+        }
+        this.setCursor('default');
+      }
+    }
   }
 
   private setCursor(cursor: string): void {
@@ -750,24 +836,217 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   private handlePointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return; // Only left click
-
-    // Only proceed if clicking on the canvas directly
     if (event.target !== this.renderer.domElement) return;
 
+    this.pointerDownCoord = { x: event.clientX, y: event.clientY, time: Date.now() };
+
     if (!this.placementMode()) return;
-    if (this.pendingHotspot()) return; // Wait until current point is handled
+    if (this.pendingHotspot()) return;
 
     const hit = this.pickSurface(event);
     if (!hit?.face) return;
 
-    // Use world space position directly from raycaster
     const point = hit.point.clone();
-    // Extract normal in world space
     this.tmpNormalMatrix.getNormalMatrix(hit.object.matrixWorld);
     const worldNormal = hit.face.normal.clone().applyMatrix3(this.tmpNormalMatrix).normalize();
 
     this.pendingHotspot.set({ position: point, normal: worldNormal });
   };
+
+  private handlePointerUp = (event: PointerEvent): void => {
+    if (event.button !== 0) return;
+    if (this.placementMode()) return;
+
+    const dx = event.clientX - this.pointerDownCoord.x;
+    const dy = event.clientY - this.pointerDownCoord.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < 6 && (Date.now() - this.pointerDownCoord.time < 500)) {
+      if (this.isDentalModel()) {
+        const hit = this.pickSurface(event);
+        if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059')) {
+          const isUpper = hit.object.name === 'Group1059';
+          const localPt = hit.object.worldToLocal(hit.point.clone());
+          const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper);
+          this.selectTooth(tooth);
+        }
+      }
+    }
+  };
+
+  private handlePointerLeave = (): void => {
+    if (this.hoveredTooth()) {
+      this.ngZone.run(() => this.hoveredTooth.set(null));
+    }
+  };
+
+  isDentalModel(): boolean {
+    return this.loadedOrgan?.id === 'teeth-obj' ||
+      (this.clickableMeshes?.has('Group1014') ?? false) ||
+      (this.clickableMeshes?.has('Group1059') ?? false);
+  }
+
+  selectTooth(tooth: ToothData): void {
+    this.ngZone.run(() => {
+      this.selectedTooth.set(tooth);
+      this.selectedQuadrants.set(new Set<ToothQuadrant>(['q1', 'q2', 'q3', 'q4']));
+    });
+  }
+
+  closeToothPanel(): void {
+    this.selectedTooth.set(null);
+  }
+
+  toggleQuadrant(q: ToothQuadrant): void {
+    const current = new Set(this.selectedQuadrants());
+    if (current.has(q)) {
+      current.delete(q);
+    } else {
+      current.add(q);
+    }
+    this.selectedQuadrants.set(current);
+  }
+
+  selectAllQuadrants(): void {
+    this.selectedQuadrants.set(new Set<ToothQuadrant>(['q1', 'q2', 'q3', 'q4']));
+  }
+
+  applyColorToSelectedQuadrants(colorHex: string): void {
+    const tooth = this.selectedTooth();
+    if (!tooth) return;
+
+    this.activeColor.set(colorHex);
+    const toothMap = new Map(this.toothColors());
+    const currentColors = { ...(toothMap.get(tooth.number) || {}) };
+
+    for (const q of this.selectedQuadrants()) {
+      currentColors[q] = colorHex;
+    }
+
+    toothMap.set(tooth.number, currentColors);
+    this.toothColors.set(toothMap);
+
+    this.updateMeshVertexColors();
+  }
+
+  resetCurrentTooth(): void {
+    const tooth = this.selectedTooth();
+    if (!tooth) return;
+
+    const toothMap = new Map(this.toothColors());
+    toothMap.delete(tooth.number);
+    this.toothColors.set(toothMap);
+
+    this.updateMeshVertexColors();
+  }
+
+  resetAllTeeth(): void {
+    this.toothColors.set(new Map());
+    this.updateMeshVertexColors();
+  }
+
+  getQuadrantColor(toothNumber: number, q: ToothQuadrant): string | undefined {
+    return this.toothColors().get(toothNumber)?.[q];
+  }
+
+  getQuadrantColorName(toothNumber: number, q: ToothQuadrant): string {
+    const color = this.getQuadrantColor(toothNumber, q);
+    if (!color) return 'Natural Enamel';
+    const preset = this.shadePresets.find(p => p.hex.toLowerCase() === color.toLowerCase());
+    return preset ? preset.code : color;
+  }
+
+  updateMeshVertexColors(): void {
+    if (!this.model) return;
+
+    const image = this.getDentalDiffuseImage();
+    const sample = image ? this.getTextureSample(image) : null;
+    const colorsMap = this.toothColors();
+
+    this.model.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || (mesh.name !== 'Group1014' && mesh.name !== 'Group1059')) return;
+
+      const geo = mesh.geometry;
+      const pos = geo.attributes['position'];
+      const uvAttr = geo.attributes['uv'];
+      let colorAttr = geo.attributes['color'] as THREE.BufferAttribute;
+
+      if (!colorAttr) {
+        const colors = new Float32Array(pos.count * 3).fill(1.0);
+        colorAttr = new THREE.BufferAttribute(colors, 3);
+        geo.setAttribute('color', colorAttr);
+      }
+
+      const isUpper = mesh.name === 'Group1059';
+      const colorArray = colorAttr.array as Float32Array;
+
+      for (let i = 0; i < pos.count; i++) {
+        const idx = i * 3;
+
+        // Check if gum using texture sample: if gum, leave white (unaltered)
+        if (sample && uvAttr) {
+          const u = uvAttr.getX(i);
+          const v = uvAttr.getY(i);
+          const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(u * sample.width)));
+          const sy = Math.min(sample.height - 1, Math.max(0, Math.floor(v * sample.height)));
+          const sIndex = (sy * sample.width + sx) * 4;
+          const r = sample.data[sIndex];
+          const g = sample.data[sIndex + 1];
+          const b = sample.data[sIndex + 2];
+          if (r > g + 25 && r > b + 25 && g < 180) {
+            colorArray[idx] = 1.0;
+            colorArray[idx + 1] = 1.0;
+            colorArray[idx + 2] = 1.0;
+            continue;
+          }
+        }
+
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        const z = pos.getZ(i);
+
+        const tooth = this.dentalService.identifyTooth(x, y, z, isUpper);
+        const toothQuadrantColors = colorsMap.get(tooth.number);
+
+        if (toothQuadrantColors) {
+          const quadrant = this.dentalService.getQuadrant(x, y, tooth);
+          const hex = toothQuadrantColors[quadrant];
+          if (hex) {
+            const rgb = this.dentalService.hexToRgb(hex);
+            colorArray[idx] = rgb[0];
+            colorArray[idx + 1] = rgb[1];
+            colorArray[idx + 2] = rgb[2];
+            continue;
+          }
+        }
+
+        colorArray[idx] = 1.0;
+        colorArray[idx + 1] = 1.0;
+        colorArray[idx + 2] = 1.0;
+      }
+
+      colorAttr.needsUpdate = true;
+    });
+
+    this.requestRender();
+  }
+
+  private getDentalDiffuseImage(): TextureImage | null {
+    let image: TextureImage | null = null;
+    this.model?.traverse((child) => {
+      if (image) return;
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+        const texture = (mat as THREE.MeshStandardMaterial)?.map;
+        if (texture?.image) {
+          image = texture.image as unknown as TextureImage;
+        }
+      }
+    });
+    return image;
+  }
 
   togglePlacementMode(): void {
     const isPlacing = !this.placementMode();
@@ -845,7 +1124,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const canvas = this.renderer?.domElement;
     if (canvas) {
       canvas.removeEventListener('pointerdown', this.handlePointerDown);
+      canvas.removeEventListener('pointerup', this.handlePointerUp);
       canvas.removeEventListener('pointermove', this.handlePointerMove);
+      canvas.removeEventListener('pointerleave', this.handlePointerLeave);
     }
 
     this.controls?.removeEventListener('change', this.handleControlsChange);
