@@ -20,6 +20,9 @@ export interface ToothEnamelBounds {
   minH: number;
   maxH: number;
   midH: number;
+  minU: number;
+  maxU: number;
+  midU: number;
   archTangent: { x: number; z: number };
   anchor: { x: number; y: number; z: number };
 }
@@ -33,8 +36,38 @@ interface ArchCreasePlane {
 }
 
 /**
- * Natural interproximal vertical valleys/creases (from inner lingual/palatal to outer labial/buccal)
- * separating the 8 teeth along each half-arch from midline (index 0) to 3rd molar (index 8).
+ * Exact UV horizontal distance (`uDist` from arch midline symmetry axis) of the 6 sculpted
+ * interproximal grooves per half-arch in `teeth.OBJ` (7 physical teeth per quadrant = 28 teeth total).
+ * Each corner tooth (#2, #15, #18, #31) is counted as a single complete molar from crease 6 to the back.
+ */
+const UPPER_SYMMETRY_U = 0.3784;
+const LOWER_SYMMETRY_U = 0.65595;
+
+const UPPER_CREASE_U_DIST: readonly number[] = [
+  0.0000, // Midline (#8 | #9)
+  0.0550, // Central | Lateral (#8|#7, #9|#10)
+  0.1033, // Lateral | Canine (#7|#6, #10|#11)
+  0.1497, // Canine | 1st Premolar (#6|#5, #11|#12)
+  0.1920, // 1st | 2nd Premolar (#5|#4, #12|#13)
+  0.2441, // 2nd Premolar | 1st Molar (#4|#3, #13|#14)
+  0.3010, // 1st | Corner 2nd Molar (#3|#2, #14|#15)
+  0.3800, // Distal border of Corner 2nd Molar (#2, #15)
+];
+
+const LOWER_CREASE_U_DIST: readonly number[] = [
+  0.0000, // Midline (#25 | #24)
+  0.0469, // Central | Lateral (#25|#26, #24|#23)
+  0.0864, // Lateral | Canine (#26|#27, #23|#22)
+  0.1235, // Canine | 1st Premolar (#27|#28, #22|#21)
+  0.1601, // 1st | 2nd Premolar (#28|#29, #21|#20)
+  0.2088, // 2nd Premolar | 1st Molar (#29|#30, #20|#19)
+  0.2685, // 1st | Corner 2nd Molar (#30|#31, #19|#18)
+  0.3400, // Distal border of Corner 2nd Molar (#31, #18)
+];
+
+/**
+ * Natural 3D interproximal vertical valleys/creases (from inner lingual/palatal to outer labial/buccal)
+ * used to compute local arch tangents and as a 3D fallback when UV coordinates are not provided.
  */
 const UPPER_ARCH_CREASES: readonly ArchCreasePlane[] = [
   { x1: 0.00, z1: 31.80, x2: 0.00, z2: 33.50 },                 // Midline (#8 | #9)
@@ -43,9 +76,8 @@ const UPPER_ARCH_CREASES: readonly ArchCreasePlane[] = [
   { x1: 16.85, z1: 21.00, x2: 20.00, z2: 22.85 },               // Canine | 1st Premolar (#6|#5, #11|#12)
   { x1: 19.00, z1: 15.80, x2: 21.95, z2: 17.05 },               // 1st | 2nd Premolar (#5|#4, #12|#13)
   { x1: 21.20, z1: 8.70, x2: 25.60, z2: 10.00 },                // 2nd Premolar | 1st Molar (#4|#3, #13|#14)
-  { x1: 22.75, z1: 0.70, x2: 27.00, z2: 1.50, yTilt: 0.16 },    // 1st | 2nd Molar (#3|#2, #14|#15)
-  { x1: 23.20, z1: -3.80, x2: 28.20, z2: -3.20, yTilt: 0.16 },  // 2nd | 3rd Molar (#2|#1, #15|#16)
-  { x1: 24.50, z1: -9.80, x2: 27.50, z2: -9.50 },               // Distal border of 3rd Molar (#1, #16)
+  { x1: 22.75, z1: 0.70, x2: 27.00, z2: 1.50, yTilt: 0.16 },    // 1st | Corner 2nd Molar (#3|#2, #14|#15)
+  { x1: 24.50, z1: -9.80, x2: 27.50, z2: -9.50 },               // Distal border of Corner 2nd Molar (#2, #15)
 ];
 
 const LOWER_ARCH_CREASES: readonly ArchCreasePlane[] = [
@@ -55,9 +87,8 @@ const LOWER_ARCH_CREASES: readonly ArchCreasePlane[] = [
   { x1: 13.50, z1: 19.00, x2: 17.30, z2: 21.75 },               // Canine | 1st Premolar (#27|#28, #22|#21)
   { x1: 16.20, z1: 14.80, x2: 18.45, z2: 16.20 },               // 1st | 2nd Premolar (#28|#29, #21|#20)
   { x1: 18.10, z1: 7.80, x2: 21.70, z2: 9.10 },                 // 2nd Premolar | 1st Molar (#29|#30, #20|#19)
-  { x1: 21.20, z1: -0.10, x2: 25.10, z2: 0.90 },                // 1st | 2nd Molar (#30|#31, #19|#18)
-  { x1: 21.70, z1: -4.30, x2: 26.60, z2: -3.20 },               // 2nd | 3rd Molar (#31|#32, #18|#17)
-  { x1: 22.90, z1: -9.80, x2: 26.00, z2: -9.60 },               // Distal border of 3rd Molar (#32, #17)
+  { x1: 21.20, z1: -0.10, x2: 25.30, z2: 0.50 },                // 1st | Corner 2nd Molar (#30|#31, #19|#18)
+  { x1: 22.90, z1: -9.80, x2: 26.00, z2: -9.60 },               // Distal border of Corner 2nd Molar (#31, #18)
 ];
 
 @Injectable({
@@ -68,12 +99,12 @@ export class DentalService {
 
   /**
    * Gum vs Enamel pixel classification:
-   * Never rejects tooth crown vertices/triangles based on brightness thresholds (so shaded
-   * occlusal pits and enamel grooves never leave uncolored holes).
-   * Only classifies a pixel as Gum if it is distinctly pink/reddish.
+   * Never rejects tooth crown vertices/triangles based on brightness thresholds or warm
+   * cervical enamel shading near the gum margin.
+   * Only classifies a pixel as Gum if it is distinctly deep pink/reddish gingival tissue.
    */
   isGumPixel(r: number, g: number, b: number): boolean {
-    const isGum = (r - g) >= 22 && (r - b) >= 28;
+    const isGum = (r - g) >= 38 && (r - b) >= 48;
     return isGum;
   }
 
@@ -82,21 +113,34 @@ export class DentalService {
   }
 
   /**
-   * Identifies the exact tooth (#1-#32) given local mesh vertex coordinates.
-   * Uses the natural interproximal vertical valleys/creases along the U-shaped arch so
-   * every tooth covers 100% of its crown width edge-to-edge without bleeding into neighbors.
+   * Identifies the exact tooth given local mesh vertex coordinates (and UV `u` when available).
+   * Using `u` (unwrapped along the 6 sculpted interproximal valleys per half-arch) guarantees 0% overlap
+   * between adjacent teeth and treats each corner molar as a single complete tooth (28 teeth total).
    */
-  identifyTooth(x: number, y: number, z: number, isUpper: boolean): ToothData {
-    const creases = isUpper ? UPPER_ARCH_CREASES : LOWER_ARCH_CREASES;
-    const ax = Math.abs(x);
+  identifyTooth(x: number, y: number, z: number, isUpper: boolean, u?: number): ToothData {
     let archIdx = 0;
 
-    for (let i = 1; i < creases.length - 1; i++) {
-      const c = creases[i];
-      const zAdj = c.yTilt ? z - c.yTilt * y : z;
-      const cross = (c.x2 - c.x1) * (zAdj - c.z1) - (c.z2 - c.z1) * (ax - c.x1);
-      if (cross < 0) {
-        archIdx = i;
+    if (u !== undefined) {
+      const uSym = isUpper ? UPPER_SYMMETRY_U : LOWER_SYMMETRY_U;
+      const uDist = x >= 0 ? (uSym - u) : (u - uSym);
+      const creasesU = isUpper ? UPPER_CREASE_U_DIST : LOWER_CREASE_U_DIST;
+
+      for (let i = 1; i < creasesU.length - 1; i++) {
+        if (uDist >= creasesU[i]) {
+          archIdx = i;
+        }
+      }
+    } else {
+      const creases = isUpper ? UPPER_ARCH_CREASES : LOWER_ARCH_CREASES;
+      const ax = Math.abs(x);
+
+      for (let i = 1; i < creases.length - 1; i++) {
+        const c = creases[i];
+        const zAdj = c.yTilt ? z - c.yTilt * y : z;
+        const cross = (c.x2 - c.x1) * (zAdj - c.z1) - (c.z2 - c.z1) * (ax - c.x1);
+        if (cross < 0) {
+          archIdx = i;
+        }
       }
     }
 
@@ -123,7 +167,7 @@ export class DentalService {
       : (isRightSide ? num - 25 : 24 - num);
 
     const creases = isUpper ? UPPER_ARCH_CREASES : LOWER_ARCH_CREASES;
-    const clampedIdx = Math.max(0, Math.min(7, idx));
+    const clampedIdx = Math.max(0, Math.min(creases.length - 2, idx));
     const cMesial = creases[clampedIdx];
     const cDistal = creases[clampedIdx + 1];
     const signX = isRightSide ? -1 : 1;
@@ -174,6 +218,8 @@ export class DentalService {
 
   /**
    * Determines which quadrant (q1..q4) a vertex belongs to in the arch-aware local frame.
+   * Uses UV `u` when available so the vertical split is 100% parallel to the sculpted
+   * mesial and distal interproximal grooves from gum line to incisal edge.
    * Q1: Top-Left, Q2: Top-Right, Q3: Bottom-Left, Q4: Bottom-Right
    */
   getQuadrant(
@@ -181,15 +227,23 @@ export class DentalService {
     y: number,
     tooth: ToothData,
     bounds?: ToothEnamelBounds,
-    z = tooth.center.z
+    z = tooth.center.z,
+    u?: number
   ): ToothQuadrant {
-    const h = this.projectHorizontal(x, z, tooth, bounds);
-    const midH = bounds
-      ? bounds.midH
-      : this.projectHorizontal(tooth.center.x, tooth.center.z, tooth);
     const midY = bounds ? bounds.midY : tooth.center.y;
     const isTop = y >= midY;
-    const isLeft = h < midH;
+
+    let isLeft: boolean;
+    if (u !== undefined && bounds) {
+      // Across both arches, `u` decreases monotonically from Left to Right along the arch
+      isLeft = u > bounds.midU;
+    } else {
+      const h = this.projectHorizontal(x, z, tooth, bounds);
+      const midH = bounds
+        ? bounds.midH
+        : this.projectHorizontal(tooth.center.x, tooth.center.z, tooth);
+      isLeft = h < midH;
+    }
 
     if (isTop && isLeft) return 'q1';
     if (isTop && !isLeft) return 'q2';
@@ -222,7 +276,7 @@ export class DentalService {
 
   /**
    * Checks if a vertex is near a division boundary in the tooth's arch-aware local frame
-   * for crisp CAD grid line visualization across front and back teeth (#1-#32).
+   * for crisp, high-contrast CAD grid line visualization across front and back teeth (#1-#32).
    */
   isNearBoundary(
     x: number,
@@ -231,19 +285,27 @@ export class DentalService {
     mode: DivisionMode,
     bounds?: ToothEnamelBounds,
     z = tooth.center.z,
-    epsilon = 0.11
+    epsilon = 0.14,
+    u?: number
   ): boolean {
     if (mode === 1) return false;
-    const h = this.projectHorizontal(x, z, tooth, bounds);
-    const midH = bounds
-      ? bounds.midH
-      : this.projectHorizontal(tooth.center.x, tooth.center.z, tooth);
     const midY = bounds ? bounds.midY : tooth.center.y;
-    const dh = h - midH;
     const dy = y - midY;
 
+    let nearVertical = false;
+    if (u !== undefined && bounds) {
+      const uSpan = Math.max(0.015, bounds.maxU - bounds.minU);
+      nearVertical = Math.abs(u - bounds.midU) < uSpan * 0.032;
+    } else {
+      const h = this.projectHorizontal(x, z, tooth, bounds);
+      const midH = bounds
+        ? bounds.midH
+        : this.projectHorizontal(tooth.center.x, tooth.center.z, tooth);
+      nearVertical = Math.abs(h - midH) < epsilon;
+    }
+
     if (mode === 2) {
-      return Math.abs(dh) < epsilon;
+      return nearVertical;
     }
     if (mode === 3) {
       if (bounds) {
@@ -255,7 +317,7 @@ export class DentalService {
       return Math.abs(dy - 1.3) < epsilon || Math.abs(dy + 1.3) < epsilon;
     }
     if (mode === 4) {
-      return Math.abs(dh) < epsilon || Math.abs(dy) < epsilon;
+      return nearVertical || Math.abs(dy) < epsilon;
     }
     return false;
   }

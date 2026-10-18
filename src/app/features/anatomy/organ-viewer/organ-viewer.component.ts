@@ -814,7 +814,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059') && !this.checkIsGum(hit)) {
         const isUpper = hit.object.name === 'Group1059';
         const localPt = hit.object.worldToLocal(hit.point.clone());
-        const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper);
+        const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper, hit.uv?.x);
 
         const rect = this.canvasContainer.nativeElement.getBoundingClientRect();
         const x = event.clientX - rect.left;
@@ -882,7 +882,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059') && !this.checkIsGum(hit)) {
           const isUpper = hit.object.name === 'Group1059';
           const localPt = hit.object.worldToLocal(hit.point.clone());
-          const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper);
+          const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper, hit.uv?.x);
 
           this.selectTooth(tooth, localPt);
         }
@@ -1066,20 +1066,53 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Subdivides each triangle of a non-indexed BufferGeometry into 4 sub-triangles per iteration
-   * (e.g. 3 iterations: 1 triangle -> 64 micro-triangles), interpolating position, normal, and uv
-   * at the 3 edge midpoints (m01, m12, m20) for razor-sharp CAD boundaries and outer edges.
+   * Subdivides each quad (2 consecutive triangles: (A,B,C) and (A,C,D)) of a non-indexed BufferGeometry
+   * bilinearly into 4 rectangular sub-quads per iteration (3 iterations: 1 quad -> 64 micro-quads),
+   * interpolating position, normal, and uv at the 4 edge midpoints (mAB, mBC, mCD, mDA) and quad center.
+   * Preserves the 6-vertex quad pairing so micro-quads can be colored without diagonal sawtooth spikes.
    */
   private subdivideGeometry(geometry: THREE.BufferGeometry, iterations = 3): THREE.BufferGeometry {
     let current = geometry;
+
+    const emitQuadPos = (
+      dst: Float32Array, out: number,
+      ax: number, ay: number, az: number,
+      bx: number, by: number, bz: number,
+      cx: number, cy: number, cz: number,
+      dx: number, dy: number, dz: number
+    ): number => {
+      dst[out++] = ax; dst[out++] = ay; dst[out++] = az;
+      dst[out++] = bx; dst[out++] = by; dst[out++] = bz;
+      dst[out++] = cx; dst[out++] = cy; dst[out++] = cz;
+      dst[out++] = ax; dst[out++] = ay; dst[out++] = az;
+      dst[out++] = cx; dst[out++] = cy; dst[out++] = cz;
+      dst[out++] = dx; dst[out++] = dy; dst[out++] = dz;
+      return out;
+    };
+
+    const emitQuadUv = (
+      dst: Float32Array, out: number,
+      au: number, av: number,
+      bu: number, bv: number,
+      cu: number, cv: number,
+      du: number, dv: number
+    ): number => {
+      dst[out++] = au; dst[out++] = av;
+      dst[out++] = bu; dst[out++] = bv;
+      dst[out++] = cu; dst[out++] = cv;
+      dst[out++] = au; dst[out++] = av;
+      dst[out++] = cu; dst[out++] = cv;
+      dst[out++] = du; dst[out++] = dv;
+      return out;
+    };
 
     for (let iter = 0; iter < iterations; iter++) {
       const posAttr = current.attributes['position'] as THREE.BufferAttribute;
       const normAttr = current.attributes['normal'] as THREE.BufferAttribute | undefined;
       const uvAttr = current.attributes['uv'] as THREE.BufferAttribute | undefined;
 
-      const triCount = Math.floor(posAttr.count / 3);
-      const nextVertCount = triCount * 12; // 4 sub-triangles * 3 vertices
+      const quadCount = Math.floor(posAttr.count / 6);
+      const nextVertCount = quadCount * 24; // 4 sub-quads * 6 vertices
 
       const srcPos = posAttr.array as Float32Array;
       const dstPos = new Float32Array(nextVertCount * 3);
@@ -1094,107 +1127,81 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       let nOut = 0;
       let uOut = 0;
 
-      for (let t = 0; t < triCount; t++) {
-        const i0 = t * 3;
-        const i1 = i0 + 1;
-        const i2 = i0 + 2;
+      for (let q = 0; q < quadCount; q++) {
+        const iA = q * 6;
+        const iB = iA + 1;
+        const iC = iA + 2;
+        const iD = iA + 5;
 
-        const p0 = i0 * 3, p1 = i1 * 3, p2 = i2 * 3;
-        const x0 = srcPos[p0], y0 = srcPos[p0 + 1], z0 = srcPos[p0 + 2];
-        const x1 = srcPos[p1], y1 = srcPos[p1 + 1], z1 = srcPos[p1 + 2];
-        const x2 = srcPos[p2], y2 = srcPos[p2 + 1], z2 = srcPos[p2 + 2];
+        const pA = iA * 3, pB = iB * 3, pC = iC * 3, pD = iD * 3;
+        const ax = srcPos[pA], ay = srcPos[pA + 1], az = srcPos[pA + 2];
+        const bx = srcPos[pB], by = srcPos[pB + 1], bz = srcPos[pB + 2];
+        const cx = srcPos[pC], cy = srcPos[pC + 1], cz = srcPos[pC + 2];
+        const dx = srcPos[pD], dy = srcPos[pD + 1], dz = srcPos[pD + 2];
 
-        const mx01 = 0.5 * (x0 + x1), my01 = 0.5 * (y0 + y1), mz01 = 0.5 * (z0 + z1);
-        const mx12 = 0.5 * (x1 + x2), my12 = 0.5 * (y1 + y2), mz12 = 0.5 * (z1 + z2);
-        const mx20 = 0.5 * (x2 + x0), my20 = 0.5 * (y2 + y0), mz20 = 0.5 * (z2 + z0);
+        const abx = 0.5 * (ax + bx), aby = 0.5 * (ay + by), abz = 0.5 * (az + bz);
+        const bcx = 0.5 * (bx + cx), bcy = 0.5 * (by + cy), bcz = 0.5 * (bz + cz);
+        const cdx = 0.5 * (cx + dx), cdy = 0.5 * (cy + dy), cdz = 0.5 * (cz + dz);
+        const dax = 0.5 * (dx + ax), day = 0.5 * (dy + ay), daz = 0.5 * (dz + az);
+        const mx = 0.25 * (ax + bx + cx + dx);
+        const my = 0.25 * (ay + by + cy + dy);
+        const mz = 0.25 * (az + bz + cz + dz);
 
-        // Sub-triangle 1: (v0, m01, m20)
-        dstPos[pOut++] = x0;   dstPos[pOut++] = y0;   dstPos[pOut++] = z0;
-        dstPos[pOut++] = mx01; dstPos[pOut++] = my01; dstPos[pOut++] = mz01;
-        dstPos[pOut++] = mx20; dstPos[pOut++] = my20; dstPos[pOut++] = mz20;
-
-        // Sub-triangle 2: (m01, v1, m12)
-        dstPos[pOut++] = mx01; dstPos[pOut++] = my01; dstPos[pOut++] = mz01;
-        dstPos[pOut++] = x1;   dstPos[pOut++] = y1;   dstPos[pOut++] = z1;
-        dstPos[pOut++] = mx12; dstPos[pOut++] = my12; dstPos[pOut++] = mz12;
-
-        // Sub-triangle 3: (m20, m12, v2)
-        dstPos[pOut++] = mx20; dstPos[pOut++] = my20; dstPos[pOut++] = mz20;
-        dstPos[pOut++] = mx12; dstPos[pOut++] = my12; dstPos[pOut++] = mz12;
-        dstPos[pOut++] = x2;   dstPos[pOut++] = y2;   dstPos[pOut++] = z2;
-
-        // Sub-triangle 4: (m01, m12, m20)
-        dstPos[pOut++] = mx01; dstPos[pOut++] = my01; dstPos[pOut++] = mz01;
-        dstPos[pOut++] = mx12; dstPos[pOut++] = my12; dstPos[pOut++] = mz12;
-        dstPos[pOut++] = mx20; dstPos[pOut++] = my20; dstPos[pOut++] = mz20;
+        pOut = emitQuadPos(dstPos, pOut, ax, ay, az, abx, aby, abz, mx, my, mz, dax, day, daz);
+        pOut = emitQuadPos(dstPos, pOut, abx, aby, abz, bx, by, bz, bcx, bcy, bcz, mx, my, mz);
+        pOut = emitQuadPos(dstPos, pOut, mx, my, mz, bcx, bcy, bcz, cx, cy, cz, cdx, cdy, cdz);
+        pOut = emitQuadPos(dstPos, pOut, dax, day, daz, mx, my, mz, cdx, cdy, cdz, dx, dy, dz);
 
         if (srcNorm && dstNorm) {
-          const nx0 = srcNorm[p0], ny0 = srcNorm[p0 + 1], nz0 = srcNorm[p0 + 2];
-          const nx1 = srcNorm[p1], ny1 = srcNorm[p1 + 1], nz1 = srcNorm[p1 + 2];
-          const nx2 = srcNorm[p2], ny2 = srcNorm[p2 + 1], nz2 = srcNorm[p2 + 2];
+          const nax = srcNorm[pA], nay = srcNorm[pA + 1], naz = srcNorm[pA + 2];
+          const nbx = srcNorm[pB], nby = srcNorm[pB + 1], nbz = srcNorm[pB + 2];
+          const ncx = srcNorm[pC], ncy = srcNorm[pC + 1], ncz = srcNorm[pC + 2];
+          const ndx = srcNorm[pD], ndy = srcNorm[pD + 1], ndz = srcNorm[pD + 2];
 
-          let n01x = nx0 + nx1, n01y = ny0 + ny1, n01z = nz0 + nz1;
-          const l01 = Math.hypot(n01x, n01y, n01z) || 1;
-          n01x /= l01; n01y /= l01; n01z /= l01;
+          let nabx = nax + nbx, naby = nay + nby, nabz = naz + nbz;
+          const lab = Math.hypot(nabx, naby, nabz) || 1;
+          nabx /= lab; naby /= lab; nabz /= lab;
 
-          let n12x = nx1 + nx2, n12y = ny1 + ny2, n12z = nz1 + nz2;
-          const l12 = Math.hypot(n12x, n12y, n12z) || 1;
-          n12x /= l12; n12y /= l12; n12z /= l12;
+          let nbcx = nbx + ncx, nbcy = nby + ncy, nbcz = nbz + ncz;
+          const lbc = Math.hypot(nbcx, nbcy, nbcz) || 1;
+          nbcx /= lbc; nbcy /= lbc; nbcz /= lbc;
 
-          let n20x = nx2 + nx0, n20y = ny2 + ny0, n20z = nz2 + nz0;
-          const l20 = Math.hypot(n20x, n20y, n20z) || 1;
-          n20x /= l20; n20y /= l20; n20z /= l20;
+          let ncdx = ncx + ndx, ncdy = ncy + ndy, ncdz = ncz + ndz;
+          const lcd = Math.hypot(ncdx, ncdy, ncdz) || 1;
+          ncdx /= lcd; ncdy /= lcd; ncdz /= lcd;
 
-          // Sub-triangle 1: (v0, m01, m20)
-          dstNorm[nOut++] = nx0;  dstNorm[nOut++] = ny0;  dstNorm[nOut++] = nz0;
-          dstNorm[nOut++] = n01x; dstNorm[nOut++] = n01y; dstNorm[nOut++] = n01z;
-          dstNorm[nOut++] = n20x; dstNorm[nOut++] = n20y; dstNorm[nOut++] = n20z;
+          let ndax = ndx + nax, nday = ndy + nay, ndaz = ndz + naz;
+          const lda = Math.hypot(ndax, nday, ndaz) || 1;
+          ndax /= lda; nday /= lda; ndaz /= lda;
 
-          // Sub-triangle 2: (m01, v1, m12)
-          dstNorm[nOut++] = n01x; dstNorm[nOut++] = n01y; dstNorm[nOut++] = n01z;
-          dstNorm[nOut++] = nx1;  dstNorm[nOut++] = ny1;  dstNorm[nOut++] = nz1;
-          dstNorm[nOut++] = n12x; dstNorm[nOut++] = n12y; dstNorm[nOut++] = n12z;
+          let nmx = nax + nbx + ncx + ndx, nmy = nay + nby + ncy + ndy, nmz = naz + nbz + ncz + ndz;
+          const lm = Math.hypot(nmx, nmy, nmz) || 1;
+          nmx /= lm; nmy /= lm; nmz /= lm;
 
-          // Sub-triangle 3: (m20, m12, v2)
-          dstNorm[nOut++] = n20x; dstNorm[nOut++] = n20y; dstNorm[nOut++] = n20z;
-          dstNorm[nOut++] = n12x; dstNorm[nOut++] = n12y; dstNorm[nOut++] = n12z;
-          dstNorm[nOut++] = nx2;  dstNorm[nOut++] = ny2;  dstNorm[nOut++] = nz2;
-
-          // Sub-triangle 4: (m01, m12, m20)
-          dstNorm[nOut++] = n01x; dstNorm[nOut++] = n01y; dstNorm[nOut++] = n01z;
-          dstNorm[nOut++] = n12x; dstNorm[nOut++] = n12y; dstNorm[nOut++] = n12z;
-          dstNorm[nOut++] = n20x; dstNorm[nOut++] = n20y; dstNorm[nOut++] = n20z;
+          nOut = emitQuadPos(dstNorm, nOut, nax, nay, naz, nabx, naby, nabz, nmx, nmy, nmz, ndax, nday, ndaz);
+          nOut = emitQuadPos(dstNorm, nOut, nabx, naby, nabz, nbx, nby, nbz, nbcx, nbcy, nbcz, nmx, nmy, nmz);
+          nOut = emitQuadPos(dstNorm, nOut, nmx, nmy, nmz, nbcx, nbcy, nbcz, ncx, ncy, ncz, ncdx, ncdy, ncdz);
+          nOut = emitQuadPos(dstNorm, nOut, ndax, nday, ndaz, nmx, nmy, nmz, ncdx, ncdy, ncdz, ndx, ndy, ndz);
         }
 
         if (srcUv && dstUv) {
-          const u0 = i0 * 2, u1 = i1 * 2, u2 = i2 * 2;
-          const uvx0 = srcUv[u0], uvy0 = srcUv[u0 + 1];
-          const uvx1 = srcUv[u1], uvy1 = srcUv[u1 + 1];
-          const uvx2 = srcUv[u2], uvy2 = srcUv[u2 + 1];
+          const uA = iA * 2, uB = iB * 2, uC = iC * 2, uD = iD * 2;
+          const au = srcUv[uA], av = srcUv[uA + 1];
+          const bu = srcUv[uB], bv = srcUv[uB + 1];
+          const cu = srcUv[uC], cv = srcUv[uC + 1];
+          const du = srcUv[uD], dv = srcUv[uD + 1];
 
-          const uv01x = 0.5 * (uvx0 + uvx1), uv01y = 0.5 * (uvy0 + uvy1);
-          const uv12x = 0.5 * (uvx1 + uvx2), uv12y = 0.5 * (uvy1 + uvy2);
-          const uv20x = 0.5 * (uvx2 + uvx0), uv20y = 0.5 * (uvy2 + uvy0);
+          const abu = 0.5 * (au + bu), abv = 0.5 * (av + bv);
+          const bcu = 0.5 * (bu + cu), bcv = 0.5 * (bv + cv);
+          const cdu = 0.5 * (cu + du), cdv = 0.5 * (cv + dv);
+          const dau = 0.5 * (du + au), dav = 0.5 * (dv + av);
+          const mu = 0.25 * (au + bu + cu + du);
+          const mv = 0.25 * (av + bv + cv + dv);
 
-          // Sub-triangle 1: (v0, m01, m20)
-          dstUv[uOut++] = uvx0;  dstUv[uOut++] = uvy0;
-          dstUv[uOut++] = uv01x; dstUv[uOut++] = uv01y;
-          dstUv[uOut++] = uv20x; dstUv[uOut++] = uv20y;
-
-          // Sub-triangle 2: (m01, v1, m12)
-          dstUv[uOut++] = uv01x; dstUv[uOut++] = uv01y;
-          dstUv[uOut++] = uvx1;  dstUv[uOut++] = uvy1;
-          dstUv[uOut++] = uv12x; dstUv[uOut++] = uv12y;
-
-          // Sub-triangle 3: (m20, m12, v2)
-          dstUv[uOut++] = uv20x; dstUv[uOut++] = uv20y;
-          dstUv[uOut++] = uv12x; dstUv[uOut++] = uv12y;
-          dstUv[uOut++] = uvx2;  dstUv[uOut++] = uvy2;
-
-          // Sub-triangle 4: (m01, m12, m20)
-          dstUv[uOut++] = uv01x; dstUv[uOut++] = uv01y;
-          dstUv[uOut++] = uv12x; dstUv[uOut++] = uv12y;
-          dstUv[uOut++] = uv20x; dstUv[uOut++] = uv20y;
+          uOut = emitQuadUv(dstUv, uOut, au, av, abu, abv, mu, mv, dau, dav);
+          uOut = emitQuadUv(dstUv, uOut, abu, abv, bu, bv, bcu, bcv, mu, mv);
+          uOut = emitQuadUv(dstUv, uOut, mu, mv, bcu, bcv, cu, cv, cdu, cdv);
+          uOut = emitQuadUv(dstUv, uOut, dau, dav, mu, mv, cdu, cdv, du, dv);
         }
       }
 
@@ -1220,8 +1227,8 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Precomputes full-crown geometric boundaries across all white enamel triangles in each
-   * tooth's arch-aware local coordinate frame (archTangent, minH..maxH, minY..maxY)
+   * Precomputes full-crown geometric boundaries across all white enamel micro-quads in each
+   * tooth's arch-aware local coordinate frame (archTangent, minH..maxH, minY..maxY, minU..maxU)
    * so Q1..Q4, Halves, and Thirds cover 100% of the tooth surface edge-to-edge.
    */
   private computeAllToothBounds(): void {
@@ -1242,6 +1249,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         maxH: number;
         sumH: number;
         sumY: number;
+        minU: number;
+        maxU: number;
+        sumU: number;
         count: number;
         archTangent: { x: number; z: number };
       }
@@ -1255,30 +1265,32 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       const geo = mesh.geometry;
       const pos = geo.attributes['position'];
       const uvAttr = geo.attributes['uv'];
-      const triCount = Math.floor(pos.count / 3);
+      const quadCount = Math.floor(pos.count / 6);
 
-      for (let t = 0; t < triCount; t++) {
-        const i0 = t * 3;
-        const i1 = i0 + 1;
-        const i2 = i0 + 2;
+      for (let q = 0; q < quadCount; q++) {
+        const iA = q * 6;
+        const iB = iA + 1;
+        const iC = iA + 2;
+        const iD = iA + 5;
 
-        const cx = (pos.getX(i0) + pos.getX(i1) + pos.getX(i2)) / 3;
-        const cy = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
-        const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
+        const cx = 0.25 * (pos.getX(iA) + pos.getX(iB) + pos.getX(iC) + pos.getX(iD));
+        const cy = 0.25 * (pos.getY(iA) + pos.getY(iB) + pos.getY(iC) + pos.getY(iD));
+        const cz = 0.25 * (pos.getZ(iA) + pos.getZ(iB) + pos.getZ(iC) + pos.getZ(iD));
 
         // Deep vertical root cutoff
         if (isUpper && cy > 6.8) continue;
         if (!isUpper && cy < -16.5) continue;
 
+        let cu: number | undefined;
         if (uvAttr) {
-          const cu = (uvAttr.getX(i0) + uvAttr.getX(i1) + uvAttr.getX(i2)) / 3;
-          const cv = (uvAttr.getY(i0) + uvAttr.getY(i1) + uvAttr.getY(i2)) / 3;
+          cu = 0.25 * (uvAttr.getX(iA) + uvAttr.getX(iB) + uvAttr.getX(iC) + uvAttr.getX(iD));
+          const cv = 0.25 * (uvAttr.getY(iA) + uvAttr.getY(iB) + uvAttr.getY(iC) + uvAttr.getY(iD));
 
-          // Exclude palate / floor-of-mouth UV islands outside the dental crown strips
-          if (isUpper && cv < 0.80) continue;
-          if (!isUpper && (cv < 0.67 || cu < 0.315)) continue;
+          // Exclude gum / palate / floor-of-mouth UV islands outside the dental crown strips
+          if (isUpper && cv < 0.838) continue;
+          if (!isUpper && (cv < 0.6915 || cu < 0.3215)) continue;
 
-          // Texture check: skip only distinctly pink/reddish gum pixels
+          // Texture check: skip only distinctly deep pink/reddish gum pixels
           if (sample) {
             const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
             const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
@@ -1292,7 +1304,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
           }
         }
 
-        const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper);
+        const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper, cu);
         let b = accum.get(tooth.number);
         if (!b) {
           const archTangent = this.dentalService.getArchTangent(tooth);
@@ -1307,6 +1319,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
             maxH: -Infinity,
             sumH: 0,
             sumY: 0,
+            minU: Infinity,
+            maxU: -Infinity,
+            sumU: 0,
             count: 0,
             archTangent,
           };
@@ -1324,6 +1339,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         b.maxH = Math.max(b.maxH, h);
         b.sumH += h;
         b.sumY += cy;
+        if (cu !== undefined) {
+          b.minU = Math.min(b.minU, cu);
+          b.maxU = Math.max(b.maxU, cu);
+          b.sumU += cu;
+        }
         b.count++;
       }
     });
@@ -1338,6 +1358,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       const bboxMidH = (b.minH + b.maxH) / 2;
       const meanH = b.count > 0 ? b.sumH / b.count : bboxMidH;
       const midH = 0.5 * (bboxMidH + meanH);
+
+      const minU = Number.isFinite(b.minU) ? b.minU : 0;
+      const maxU = Number.isFinite(b.maxU) ? b.maxU : 1;
+      const bboxMidU = (minU + maxU) / 2;
+      const meanU = b.count > 0 && b.sumU > 0 ? b.sumU / b.count : bboxMidU;
+      const midU = 0.5 * (bboxMidU + meanU);
 
       const anchor = { x: midX, y: midY, z: midZ };
       this.dentalService.calibrateToothCenter(num, anchor, {
@@ -1359,6 +1385,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         minH: b.minH,
         maxH: b.maxH,
         midH,
+        minU,
+        maxU,
+        midU,
         archTangent: b.archTangent,
         anchor,
       });
@@ -1368,9 +1397,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Colors the dental meshes triangle-by-triangle (3 non-indexed vertices per micro-triangle)
-   * so every triangle has a single uniform color. This eliminates GPU gradient blur
-   * and creates razor-sharp CAD-like boundaries between quadrants and outer tooth borders.
+   * Colors the dental meshes micro-quad by micro-quad (all 6 vertices of each subdivided rectangular
+   * micro-quad receive the same uniform color evaluated at the micro-quad's true center).
+   * This eliminates diagonal sawtooth spikes (`\/\/`) and GPU gradient blur for clean boundaries.
    */
   updateMeshVertexColors(): void {
     if (!this.model) return;
@@ -1404,34 +1433,36 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       }
 
       const colorArray = colorAttr.array as Float32Array;
-      const triCount = Math.floor(pos.count / 3);
+      const quadCount = Math.floor(pos.count / 6);
 
-      for (let t = 0; t < triCount; t++) {
-        const i0 = t * 3;
-        const i1 = i0 + 1;
-        const i2 = i0 + 2;
+      for (let q = 0; q < quadCount; q++) {
+        const iA = q * 6;
+        const iB = iA + 1;
+        const iC = iA + 2;
+        const iD = iA + 5;
 
-        const cx = (pos.getX(i0) + pos.getX(i1) + pos.getX(i2)) / 3;
-        const cy = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
-        const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
+        const cx = 0.25 * (pos.getX(iA) + pos.getX(iB) + pos.getX(iC) + pos.getX(iD));
+        const cy = 0.25 * (pos.getY(iA) + pos.getY(iB) + pos.getY(iC) + pos.getY(iD));
+        const cz = 0.25 * (pos.getZ(iA) + pos.getZ(iB) + pos.getZ(iC) + pos.getZ(iD));
 
         // 1. Deep vertical root cutoff
         if (isUpper && cy > 6.8) {
-          this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+          this.setQuadColor(colorArray, iA, 1.0, 1.0, 1.0);
           continue;
         }
         if (!isUpper && cy < -16.5) {
-          this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+          this.setQuadColor(colorArray, iA, 1.0, 1.0, 1.0);
           continue;
         }
 
         // 2. UV tooth-strip & pink gum filter (never rejects shaded enamel pits/grooves)
+        let cu: number | undefined;
         if (uvAttr) {
-          const cu = (uvAttr.getX(i0) + uvAttr.getX(i1) + uvAttr.getX(i2)) / 3;
-          const cv = (uvAttr.getY(i0) + uvAttr.getY(i1) + uvAttr.getY(i2)) / 3;
+          cu = 0.25 * (uvAttr.getX(iA) + uvAttr.getX(iB) + uvAttr.getX(iC) + uvAttr.getX(iD));
+          const cv = 0.25 * (uvAttr.getY(iA) + uvAttr.getY(iB) + uvAttr.getY(iC) + uvAttr.getY(iD));
 
-          if ((isUpper && cv < 0.80) || (!isUpper && (cv < 0.67 || cu < 0.315))) {
-            this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+          if ((isUpper && cv < 0.838) || (!isUpper && (cv < 0.6915 || cu < 0.3215))) {
+            this.setQuadColor(colorArray, iA, 1.0, 1.0, 1.0);
             continue;
           }
 
@@ -1443,24 +1474,23 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
             const g = sample.data[sIndex + 1];
             const b = sample.data[sIndex + 2];
             if (this.dentalService.isGumPixel(r, g, b)) {
-              this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+              this.setQuadColor(colorArray, iA, 1.0, 1.0, 1.0);
               continue;
             }
           }
         }
 
-        // 3. Interproximal-aware tooth assignment
-        const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper);
+        // 3. Interproximal-aware tooth assignment (28 physical teeth: 7 per quadrant)
+        const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper, cu);
         const state = statesMap.get(tooth.number);
         const isToothSelected = selectedTooth?.number === tooth.number;
         const mode = isToothSelected ? activeMode : (state?.divisionMode ?? 4);
         const bounds = this.toothBoundsMap.get(tooth.number);
 
-        // 4. Divider grid lines for active selected tooth in arch-aware local frame
+        // 4. High-contrast divider grid lines for active selected tooth ONLY
         if (isToothSelected && showGrid && mode !== 1) {
-          if (this.dentalService.isNearBoundary(cx, cy, tooth, mode, bounds, cz)) {
-            // Crisp CAD grid line: pure white [1, 1, 1]
-            this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+          if (this.dentalService.isNearBoundary(cx, cy, tooth, mode, bounds, cz, 0.14, cu)) {
+            this.setQuadColor(colorArray, iA, 0.14, 0.18, 0.25);
             continue;
           }
         }
@@ -1472,19 +1502,19 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
             const third = this.dentalService.getThird(cy, tooth, bounds);
             colorHex = state.zones[third];
           } else {
-            const quad = this.dentalService.getQuadrant(cx, cy, tooth, bounds, cz);
+            const quad = this.dentalService.getQuadrant(cx, cy, tooth, bounds, cz, cu);
             colorHex = state.zones[quad];
           }
 
           if (colorHex) {
             const rgb = this.dentalService.hexToRgb(colorHex);
-            this.setTriangleColor(colorArray, i0, i1, i2, rgb[0], rgb[1], rgb[2]);
+            this.setQuadColor(colorArray, iA, rgb[0], rgb[1], rgb[2]);
             continue;
           }
         }
 
         // Default unaltered enamel
-        this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+        this.setQuadColor(colorArray, iA, 1.0, 1.0, 1.0);
       }
 
       colorAttr.needsUpdate = true;
@@ -1493,13 +1523,13 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.requestRender();
   }
 
-  private setTriangleColor(arr: Float32Array, i0: number, i1: number, i2: number, r: number, g: number, b: number): void {
-    const idx0 = i0 * 3;
-    const idx1 = i1 * 3;
-    const idx2 = i2 * 3;
-    arr[idx0] = r; arr[idx0 + 1] = g; arr[idx0 + 2] = b;
-    arr[idx1] = r; arr[idx1 + 1] = g; arr[idx1 + 2] = b;
-    arr[idx2] = r; arr[idx2 + 1] = g; arr[idx2 + 2] = b;
+  private setQuadColor(arr: Float32Array, iA: number, r: number, g: number, b: number): void {
+    let idx = iA * 3;
+    for (let v = 0; v < 6; v++) {
+      arr[idx++] = r;
+      arr[idx++] = g;
+      arr[idx++] = b;
+    }
   }
 
   private getDentalDiffuseImage(): TextureImage | null {
@@ -1629,9 +1659,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     if (isUpper && localPt.y > 6.8) return true;
     if (!isUpper && localPt.y < -16.5) return true;
 
-    // UV tooth-strip check: reject palate and floor-of-mouth UV regions
-    if (isUpper && hit.uv.y < 0.80) return true;
-    if (!isUpper && (hit.uv.y < 0.67 || hit.uv.x < 0.315)) return true;
+    // UV tooth-strip check: reject gum, palate, and floor-of-mouth UV regions
+    if (isUpper && hit.uv.y < 0.838) return true;
+    if (!isUpper && (hit.uv.y < 0.6915 || hit.uv.x < 0.3215)) return true;
 
     const material = Array.isArray(mesh.material)
       ? mesh.material[hit.face?.materialIndex ?? 0]
