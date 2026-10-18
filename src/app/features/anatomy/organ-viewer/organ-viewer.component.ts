@@ -34,11 +34,12 @@ import { HotspotStorageService } from '../../../core/services/hotspot-storage.se
 import {
   ToothData,
   ToothQuadrant,
-  ToothQuadrantColors,
+  DivisionMode,
+  ToothState,
   DENTAL_SHADE_PRESETS,
   DentalShadePreset,
 } from '../../../core/models/dental.model';
-import { DentalService } from '../../../core/services/dental.service';
+import { DentalService, ToothEnamelBounds } from '../../../core/services/dental.service';
 
 export interface Hotspot2D {
   data: Hotspot;
@@ -140,16 +141,20 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     name: string;
     type: string;
     isUpper: boolean;
+    zoneLabel?: string;
     x: number;
     y: number;
   } | null>(null);
 
   readonly selectedTooth = signal<ToothData | null>(null);
-  readonly selectedQuadrants = signal<Set<ToothQuadrant>>(new Set(['q1', 'q2', 'q3', 'q4']));
-  readonly activeColor = signal<string>('#E6DCBF');
-  readonly toothColors = signal<Map<number, ToothQuadrantColors>>(new Map());
+  readonly divisionMode = signal<DivisionMode>(4);
+  readonly selectedParts = signal<Set<string>>(new Set(['q1', 'q2', 'q3', 'q4']));
+  readonly showGridLines = signal<boolean>(true);
+  readonly activeColor = signal<string>('#4A9CFF');
+  readonly toothColors = signal<Map<number, ToothState>>(new Map());
   readonly shadePresets = DENTAL_SHADE_PRESETS;
   private pointerDownCoord = { x: 0, y: 0, time: 0 };
+  private toothBoundsMap = new Map<number, ToothEnamelBounds>();
 
   // Render-on-demand flags: nothing is drawn unless something actually changed.
   private needsRender = true;
@@ -433,6 +438,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     model.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (mesh.isMesh && mesh.geometry) {
+        if (mesh.name === 'Group1014' || mesh.name === 'Group1059') {
+          if (mesh.geometry.index !== null) {
+            mesh.geometry = mesh.geometry.toNonIndexed();
+            mesh.geometry.computeVertexNormals();
+          }
+        }
         if (!mesh.geometry.attributes['color']) {
           const count = mesh.geometry.attributes['position'].count;
           const colors = new Float32Array(count * 3).fill(1.0);
@@ -796,7 +807,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     if (this.isDentalModel()) {
       const hit = this.pickSurface(event);
-      if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059')) {
+      if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059') && !this.checkIsGum(hit)) {
         const isUpper = hit.object.name === 'Group1059';
         const localPt = hit.object.worldToLocal(hit.point.clone());
         const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper);
@@ -864,11 +875,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     if (dist < 6 && (Date.now() - this.pointerDownCoord.time < 500)) {
       if (this.isDentalModel()) {
         const hit = this.pickSurface(event);
-        if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059')) {
+        if (hit && (hit.object.name === 'Group1014' || hit.object.name === 'Group1059') && !this.checkIsGum(hit)) {
           const isUpper = hit.object.name === 'Group1059';
           const localPt = hit.object.worldToLocal(hit.point.clone());
           const tooth = this.dentalService.identifyTooth(localPt.x, localPt.y, localPt.z, isUpper);
-          this.selectTooth(tooth);
+
+          this.selectTooth(tooth, localPt);
         }
       }
     }
@@ -886,47 +898,132 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       (this.clickableMeshes?.has('Group1059') ?? false);
   }
 
-  selectTooth(tooth: ToothData): void {
+  selectTooth(tooth: ToothData, clickedPoint?: { x: number; y: number; z: number }): void {
     this.ngZone.run(() => {
       this.selectedTooth.set(tooth);
-      this.selectedQuadrants.set(new Set<ToothQuadrant>(['q1', 'q2', 'q3', 'q4']));
+      const state = this.toothColors().get(tooth.number);
+      if (state) {
+        this.divisionMode.set(state.divisionMode);
+      }
+      this.selectAllParts();
+      this.updateMeshVertexColors();
     });
   }
 
   closeToothPanel(): void {
     this.selectedTooth.set(null);
+    this.updateMeshVertexColors();
   }
 
-  toggleQuadrant(q: ToothQuadrant): void {
-    const current = new Set(this.selectedQuadrants());
-    if (current.has(q)) {
-      current.delete(q);
-    } else {
-      current.add(q);
+  setDivisionMode(mode: DivisionMode): void {
+    this.divisionMode.set(mode);
+    this.selectAllParts();
+
+    const tooth = this.selectedTooth();
+    if (tooth) {
+      const toothMap = new Map(this.toothColors());
+      const state = toothMap.get(tooth.number);
+      if (state) {
+        state.divisionMode = mode;
+        toothMap.set(tooth.number, { ...state });
+        this.toothColors.set(toothMap);
+      }
     }
-    this.selectedQuadrants.set(current);
+    this.updateMeshVertexColors();
   }
 
-  selectAllQuadrants(): void {
-    this.selectedQuadrants.set(new Set<ToothQuadrant>(['q1', 'q2', 'q3', 'q4']));
+  toggleGridLines(): void {
+    this.showGridLines.update(v => !v);
+    this.updateMeshVertexColors();
   }
 
-  applyColorToSelectedQuadrants(colorHex: string): void {
+  togglePart(partId: string): void {
+    const current = new Set(this.selectedParts());
+    if (current.has(partId)) {
+      if (current.size > 1) {
+        current.delete(partId);
+      }
+    } else {
+      current.add(partId);
+    }
+    this.selectedParts.set(current);
+  }
+
+  isPartSelected(partId: string): boolean {
+    return this.selectedParts().has(partId);
+  }
+
+  selectAllParts(): void {
+    const mode = this.divisionMode();
+    if (mode === 1) {
+      this.selectedParts.set(new Set(['full']));
+    } else if (mode === 2) {
+      this.selectedParts.set(new Set(['left', 'right']));
+    } else if (mode === 3) {
+      this.selectedParts.set(new Set(['top', 'middle', 'bottom']));
+    } else {
+      this.selectedParts.set(new Set(['q1', 'q2', 'q3', 'q4']));
+    }
+  }
+
+  applyColor(colorHex: string): void {
     const tooth = this.selectedTooth();
     if (!tooth) return;
 
     this.activeColor.set(colorHex);
     const toothMap = new Map(this.toothColors());
-    const currentColors = { ...(toothMap.get(tooth.number) || {}) };
+    const mode = this.divisionMode();
+    const state: ToothState = toothMap.get(tooth.number) ?? {
+      divisionMode: mode,
+      zones: {}
+    };
 
-    for (const q of this.selectedQuadrants()) {
-      currentColors[q] = colorHex;
+    state.divisionMode = mode;
+    state.zones = { ...state.zones };
+    const selected = this.selectedParts();
+
+    if (mode === 1) {
+      state.zones['q1'] = colorHex;
+      state.zones['q2'] = colorHex;
+      state.zones['q3'] = colorHex;
+      state.zones['q4'] = colorHex;
+    } else if (mode === 2) {
+      if (selected.has('left')) {
+        state.zones['q1'] = colorHex;
+        state.zones['q3'] = colorHex;
+      }
+      if (selected.has('right')) {
+        state.zones['q2'] = colorHex;
+        state.zones['q4'] = colorHex;
+      }
+    } else if (mode === 3) {
+      for (const part of selected) {
+        state.zones[part] = colorHex;
+      }
+    } else {
+      for (const quad of selected) {
+        state.zones[quad] = colorHex;
+      }
     }
 
-    toothMap.set(tooth.number, currentColors);
+    toothMap.set(tooth.number, state);
     this.toothColors.set(toothMap);
-
     this.updateMeshVertexColors();
+  }
+
+  getPartColor(toothNumber: number, partId: string): string {
+    const state = this.toothColors().get(toothNumber);
+    if (!state?.zones) return '#FAF9F5';
+    if (partId === 'full') {
+      return state.zones['q1'] || state.zones['q2'] || '#FAF9F5';
+    }
+    if (partId === 'left') {
+      return state.zones['q1'] || state.zones['q3'] || '#FAF9F5';
+    }
+    if (partId === 'right') {
+      return state.zones['q2'] || state.zones['q4'] || '#FAF9F5';
+    }
+    return state.zones[partId] || '#FAF9F5';
   }
 
   resetCurrentTooth(): void {
@@ -936,7 +1033,6 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const toothMap = new Map(this.toothColors());
     toothMap.delete(tooth.number);
     this.toothColors.set(toothMap);
-
     this.updateMeshVertexColors();
   }
 
@@ -945,28 +1041,109 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.updateMeshVertexColors();
   }
 
-  getQuadrantColor(toothNumber: number, q: ToothQuadrant): string | undefined {
-    return this.toothColors().get(toothNumber)?.[q];
-  }
-
-  getQuadrantColorName(toothNumber: number, q: ToothQuadrant): string {
-    const color = this.getQuadrantColor(toothNumber, q);
-    if (!color) return 'Natural Enamel';
-    const preset = this.shadePresets.find(p => p.hex.toLowerCase() === color.toLowerCase());
-    return preset ? preset.code : color;
-  }
-
-  updateMeshVertexColors(): void {
+  /**
+   * Precomputes full-crown geometric boundaries across all white enamel triangles
+   * so Q1..Q4, Halves, and Thirds cover 100% of the tooth surface edge-to-edge.
+   */
+  private computeAllToothBounds(): void {
     if (!this.model) return;
-
     const image = this.getDentalDiffuseImage();
     const sample = image ? this.getTextureSample(image) : null;
-    const colorsMap = this.toothColors();
+
+    const accum = new Map<number, { minX: number; maxX: number; minY: number; maxY: number }>();
 
     this.model.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh || (mesh.name !== 'Group1014' && mesh.name !== 'Group1059')) return;
 
+      const isUpper = mesh.name === 'Group1059';
+      const geo = mesh.geometry;
+      const pos = geo.attributes['position'];
+      const uvAttr = geo.attributes['uv'];
+      const triCount = Math.floor(pos.count / 3);
+
+      for (let t = 0; t < triCount; t++) {
+        const i0 = t * 3;
+        const i1 = i0 + 1;
+        const i2 = i0 + 2;
+
+        const cx = (pos.getX(i0) + pos.getX(i1) + pos.getX(i2)) / 3;
+        const cy = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
+        const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
+
+        // Vertical gum cutoff
+        if (isUpper && cy > 4.5) continue;
+        if (!isUpper && cy < -14.6) continue;
+
+        // Texture check: skip gums
+        if (sample && uvAttr) {
+          const cu = (uvAttr.getX(i0) + uvAttr.getX(i1) + uvAttr.getX(i2)) / 3;
+          const cv = (uvAttr.getY(i0) + uvAttr.getY(i1) + uvAttr.getY(i2)) / 3;
+          const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
+          const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
+          const sIndex = (sy * sample.width + sx) * 4;
+          const r = sample.data[sIndex];
+          const g = sample.data[sIndex + 1];
+          const b = sample.data[sIndex + 2];
+          if (this.dentalService.isGumPixel(r, g, b)) {
+            continue;
+          }
+        }
+
+        const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper);
+        let b = accum.get(tooth.number);
+        if (!b) {
+          b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+          accum.set(tooth.number, b);
+        }
+        b.minX = Math.min(b.minX, cx);
+        b.maxX = Math.max(b.maxX, cx);
+        b.minY = Math.min(b.minY, cy);
+        b.maxY = Math.max(b.maxY, cy);
+      }
+    });
+
+    for (const [num, b] of accum.entries()) {
+      const tooth = this.dentalService.getTooth(num);
+      const midX = (b.minX + b.maxX) / 2;
+      const midY = (b.minY + b.maxY) / 2;
+      this.toothBoundsMap.set(num, {
+        toothNumber: num,
+        minX: b.minX,
+        maxX: b.maxX,
+        minY: b.minY,
+        maxY: b.maxY,
+        midX,
+        midY,
+        anchor: tooth ? tooth.center : { x: midX, y: midY, z: 0 }
+      });
+    }
+  }
+
+  /**
+   * Colors the dental meshes triangle-by-triangle (3 non-indexed vertices per triangle)
+   * so every triangle has a single uniform color. This eliminates GPU gradient blur
+   * and creates razor-sharp CAD-like boundaries between quadrants.
+   */
+  updateMeshVertexColors(): void {
+    if (!this.model) return;
+
+    if (this.toothBoundsMap.size === 0) {
+      this.computeAllToothBounds();
+    }
+
+    const image = this.getDentalDiffuseImage();
+    const sample = image ? this.getTextureSample(image) : null;
+    const statesMap = this.toothColors();
+    const selectedTooth = this.selectedTooth();
+    const showGrid = this.showGridLines();
+    const activeMode = this.divisionMode();
+
+    this.model.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || (mesh.name !== 'Group1014' && mesh.name !== 'Group1059')) return;
+
+      const isUpper = mesh.name === 'Group1059';
       const geo = mesh.geometry;
       const pos = geo.attributes['position'];
       const uvAttr = geo.attributes['uv'];
@@ -978,58 +1155,95 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         geo.setAttribute('color', colorAttr);
       }
 
-      const isUpper = mesh.name === 'Group1059';
       const colorArray = colorAttr.array as Float32Array;
+      const triCount = Math.floor(pos.count / 3);
 
-      for (let i = 0; i < pos.count; i++) {
-        const idx = i * 3;
+      for (let t = 0; t < triCount; t++) {
+        const i0 = t * 3;
+        const i1 = i0 + 1;
+        const i2 = i0 + 2;
 
-        // Check if gum using texture sample: if gum, leave white (unaltered)
+        const cx = (pos.getX(i0) + pos.getX(i1) + pos.getX(i2)) / 3;
+        const cy = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
+        const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
+
+        // 1. Spatial vertical gum cutoff
+        if (isUpper && cy > 4.5) {
+          this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+          continue;
+        }
+        if (!isUpper && cy < -14.6) {
+          this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+          continue;
+        }
+
+        // 2. Texture gum filter
         if (sample && uvAttr) {
-          const u = uvAttr.getX(i);
-          const v = uvAttr.getY(i);
-          const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(u * sample.width)));
-          const sy = Math.min(sample.height - 1, Math.max(0, Math.floor(v * sample.height)));
+          const cu = (uvAttr.getX(i0) + uvAttr.getX(i1) + uvAttr.getX(i2)) / 3;
+          const cv = (uvAttr.getY(i0) + uvAttr.getY(i1) + uvAttr.getY(i2)) / 3;
+          const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
+          const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
           const sIndex = (sy * sample.width + sx) * 4;
           const r = sample.data[sIndex];
           const g = sample.data[sIndex + 1];
           const b = sample.data[sIndex + 2];
-          if (r > g + 25 && r > b + 25 && g < 180) {
-            colorArray[idx] = 1.0;
-            colorArray[idx + 1] = 1.0;
-            colorArray[idx + 2] = 1.0;
+          if (this.dentalService.isGumPixel(r, g, b)) {
+            this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
             continue;
           }
         }
 
-        const x = pos.getX(i);
-        const y = pos.getY(i);
-        const z = pos.getZ(i);
+        // 3. Closest tooth assignment
+        const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper);
+        const state = statesMap.get(tooth.number);
+        const isToothSelected = selectedTooth?.number === tooth.number;
+        const mode = isToothSelected ? activeMode : (state?.divisionMode ?? 4);
+        const bounds = this.toothBoundsMap.get(tooth.number);
 
-        const tooth = this.dentalService.identifyTooth(x, y, z, isUpper);
-        const toothQuadrantColors = colorsMap.get(tooth.number);
-
-        if (toothQuadrantColors) {
-          const quadrant = this.dentalService.getQuadrant(x, y, tooth);
-          const hex = toothQuadrantColors[quadrant];
-          if (hex) {
-            const rgb = this.dentalService.hexToRgb(hex);
-            colorArray[idx] = rgb[0];
-            colorArray[idx + 1] = rgb[1];
-            colorArray[idx + 2] = rgb[2];
+        // 4. Divider grid lines for active selected tooth
+        if (isToothSelected && showGrid && mode !== 1) {
+          if (this.dentalService.isNearBoundary(cx, cy, tooth, mode, bounds)) {
+            // Crisp CAD grid line: pure white [1, 1, 1]
+            this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
             continue;
           }
         }
 
-        colorArray[idx] = 1.0;
-        colorArray[idx + 1] = 1.0;
-        colorArray[idx + 2] = 1.0;
+        // 5. Dynamic zone clinical restoration coloring
+        if (state?.zones) {
+          let colorHex: string | undefined;
+          if (state.divisionMode === 3) {
+            const third = this.dentalService.getThird(cy, tooth, bounds);
+            colorHex = state.zones[third];
+          } else {
+            const quad = this.dentalService.getQuadrant(cx, cy, tooth, bounds);
+            colorHex = state.zones[quad];
+          }
+
+          if (colorHex) {
+            const rgb = this.dentalService.hexToRgb(colorHex);
+            this.setTriangleColor(colorArray, i0, i1, i2, rgb[0], rgb[1], rgb[2]);
+            continue;
+          }
+        }
+
+        // Default unaltered enamel
+        this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
       }
 
       colorAttr.needsUpdate = true;
     });
 
     this.requestRender();
+  }
+
+  private setTriangleColor(arr: Float32Array, i0: number, i1: number, i2: number, r: number, g: number, b: number): void {
+    const idx0 = i0 * 3;
+    const idx1 = i1 * 3;
+    const idx2 = i2 * 3;
+    arr[idx0] = r; arr[idx0 + 1] = g; arr[idx0 + 2] = b;
+    arr[idx1] = r; arr[idx1 + 1] = g; arr[idx1 + 2] = b;
+    arr[idx2] = r; arr[idx2 + 1] = g; arr[idx2 + 2] = b;
   }
 
   private getDentalDiffuseImage(): TextureImage | null {
@@ -1148,9 +1362,17 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   private checkIsGum(hit: THREE.Intersection): boolean {
-    if (!hit.uv) return false;
+    if (!hit.uv) return true;
 
     const mesh = hit.object as THREE.Mesh;
+    const isUpper = mesh.name === 'Group1059';
+    const localPt = mesh.worldToLocal(hit.point.clone());
+
+    // Spatial vertical cutoff:
+    // Upper arch gums/palate are at y > 5.5; Lower arch gums/floor are at y < -15.5
+    if (isUpper && localPt.y > 5.5) return true;
+    if (!isUpper && localPt.y < -15.5) return true;
+
     const material = Array.isArray(mesh.material)
       ? mesh.material[hit.face?.materialIndex ?? 0]
       : mesh.material;
@@ -1171,9 +1393,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const g = sample.data[index + 1];
     const b = sample.data[index + 2];
 
-    // Gums and tongue are pink/red. Teeth are white/yellow.
-    // Pink means red is significantly higher than green and blue.
-    return r > g + 25 && r > b + 25 && g < 180; // true = Rejected as Gum
+    return this.dentalService.isGumPixel(r, g, b); // true = Rejected as Gum
   }
 
   /**

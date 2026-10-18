@@ -1,36 +1,58 @@
 <section class="organ-viewer">
   <div class="viewer-header">
     <div>
-      <span class="viewer-label">
-        3D VIEWER
-      </span>
+      <span class="viewer-label"> 3D VIEWER </span>
 
       <h2>
         {{ organ().name }}
       </h2>
     </div>
-      
+
     <div class="viewer-actions">
-      <button type="button" 
-              class="place-point-btn"
-              [class.active]="placementMode()"
-              (click)="togglePlacementMode()">
+      <button
+        type="button"
+        class="place-point-btn"
+        [class.active]="placementMode()"
+        (click)="togglePlacementMode()"
+      >
         @if (placementMode()) {
           <span>Cancel Placement</span>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
         } @else {
           <span>Place Point</span>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+            <circle cx="12" cy="10" r="3" />
+          </svg>
         }
       </button>
 
-      <button type="button" (click)="resetCamera()">
-        Reset
-      </button>
+      <button type="button" (click)="resetCamera()">Reset</button>
 
-      <button type="button" (click)="toggleAutoRotate()">
-        Auto Rotate
-      </button>
+      <button type="button" (click)="toggleAutoRotate()">Auto Rotate</button>
     </div>
   </div>
 
@@ -44,78 +66,158 @@
 
     <div #hotspotsOverlay class="hotspots-overlay">
       @for (hotspot of hotspots2D(); track hotspot.data.id) {
-        <div class="hotspot-wrapper"
-             [attr.data-hotspot-id]="hotspot.data.id"
-             [style.left.px]="hotspot.x"
-             [style.top.px]="hotspot.y"
-             [class.hidden]="!hotspot.visible"
-             [class.active]="activeHotspot()?.id === hotspot.data.id">
-          
-          <button class="hotspot-dot"
-                  [class.custom]="hotspot.data.isCustom"
-                  (click)="selectHotspot(hotspot.data); $event.stopPropagation()">
-          </button>
-          
+        <div
+          class="hotspot-wrapper"
+          [attr.data-hotspot-id]="hotspot.data.id"
+          [style.left.px]="hotspot.x"
+          [style.top.px]="hotspot.y"
+          [class.hidden]="!hotspot.visible"
+          [class.active]="activeHotspot()?.id === hotspot.data.id"
+        >
+          <button
+            class="hotspot-dot"
+            [class.custom]="hotspot.data.isCustom"
+            (click)="selectHotspot(hotspot.data); $event.stopPropagation()"
+          ></button>
+
           @if (activeHotspot()?.id === hotspot.data.id) {
             <div class="hotspot-tooltip" (click)="$event.stopPropagation()">
               <div class="tooltip-header">
-                <span class="tooltip-indicator" [class.custom]="hotspot.data.isCustom"></span>
+                <span
+                  class="tooltip-indicator"
+                  [class.custom]="hotspot.data.isCustom"
+                ></span>
                 <h4>{{ hotspot.data.name }}</h4>
                 @if (hotspot.data.isCustom) {
-                  <button class="delete-btn" (click)="deleteHotspot(hotspot.data.id); $event.stopPropagation()" title="Delete Point">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <button
+                    class="delete-btn"
+                    (click)="
+                      deleteHotspot(hotspot.data.id); $event.stopPropagation()
+                    "
+                    title="Delete Point"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
                       <polyline points="3 6 5 6 21 6"></polyline>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      <path
+                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                      ></path>
                     </svg>
                   </button>
                 }
-                <button class="close-btn" (click)="clearHotspot(); $event.stopPropagation()">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <button
+                  class="close-btn"
+                  (click)="clearHotspot(); $event.stopPropagation()"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
                 </button>
               </div>
               <p>{{ hotspot.data.description }}</p>
-              
+
               <div class="hotspot-data-input">
                 <label>Stored Data:</label>
                 <div class="input-group">
-                  <input type="number" 
-                         [(ngModel)]="hotspot.data.value" 
-                         placeholder="Enter numerical data..." />
-                  <button type="button" class="save-btn" (click)="clearHotspot(); $event.stopPropagation()">Save</button>
+                  <input
+                    type="number"
+                    [(ngModel)]="hotspot.data.value"
+                    placeholder="Enter numerical data..."
+                  />
+                  <button
+                    type="button"
+                    class="save-btn"
+                    (click)="clearHotspot(); $event.stopPropagation()"
+                  >
+                    Save
+                  </button>
                 </div>
               </div>
             </div>
           }
         </div>
       }
-      
+
       @if (pendingHotspot(); as pending) {
-        <div class="hotspot-wrapper active"
-             style="left: 50%; top: 50%;"> <!-- Centered tooltip for creation -->
-             
+        <div class="hotspot-wrapper active" style="left: 50%; top: 50%">
+          <!-- Centered tooltip for creation -->
+
           <div class="hotspot-tooltip" (click)="$event.stopPropagation()">
             <div class="tooltip-header">
               <span class="tooltip-indicator custom"></span>
               <h4>New Custom Point</h4>
-              <button class="close-btn" (click)="cancelPlacement(); $event.stopPropagation()">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <button
+                class="close-btn"
+                (click)="cancelPlacement(); $event.stopPropagation()"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <line x1="18" y1="6" x2="6" y2="18"></line>
                   <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
               </button>
             </div>
-            
+
             <div class="pending-form">
-              <input type="text" [(ngModel)]="pendingName" placeholder="Point Name (Required)" required />
-              <textarea [(ngModel)]="pendingDescription" placeholder="Description (Optional)" rows="2"></textarea>
-              <input type="number" [(ngModel)]="pendingValue" placeholder="Numerical Value (Optional)" />
-              
+              <input
+                type="text"
+                [(ngModel)]="pendingName"
+                placeholder="Point Name (Required)"
+                required
+              />
+              <textarea
+                [(ngModel)]="pendingDescription"
+                placeholder="Description (Optional)"
+                rows="2"
+              ></textarea>
+              <input
+                type="number"
+                [(ngModel)]="pendingValue"
+                placeholder="Numerical Value (Optional)"
+              />
+
               <div class="pending-actions">
-                <button type="button" class="cancel-btn" (click)="cancelPlacement()">Cancel</button>
-                <button type="button" class="save-btn" [disabled]="!pendingName.trim()" (click)="confirmPlacement()">Create</button>
+                <button
+                  type="button"
+                  class="cancel-btn"
+                  (click)="cancelPlacement()"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  class="save-btn"
+                  [disabled]="!pendingName.trim()"
+                  (click)="confirmPlacement()"
+                >
+                  Create
+                </button>
               </div>
             </div>
           </div>
@@ -125,150 +227,332 @@
 
     <!-- Dental Hover Badge: Displays Tooth Number and Name on hover -->
     @if (hoveredTooth(); as tooth) {
-      <div class="tooth-hover-badge" [style.left.px]="tooth.x + 14" [style.top.px]="tooth.y - 20">
+      <div
+        class="tooth-hover-badge"
+        [style.left.px]="tooth.x + 14"
+        [style.top.px]="tooth.y - 20"
+      >
         <div class="tooth-hover-header">
           <span class="tooth-hover-dot"></span>
           <span class="tooth-hover-num">Tooth #{{ tooth.number }}</span>
-          <span class="tooth-hover-arch">{{ tooth.isUpper ? 'Upper' : 'Lower' }}</span>
+          <span class="tooth-hover-arch">{{
+            tooth.isUpper ? "Upper Arch" : "Lower Arch"
+          }}</span>
         </div>
         <span class="tooth-hover-name">{{ tooth.name }}</span>
-        <span class="tooth-hover-hint">Click tooth to breakdown into 4 quadrants</span>
+        @if (tooth.zoneLabel) {
+          <span class="tooth-hover-zone">{{ tooth.zoneLabel }}</span>
+        }
+        <span class="tooth-hover-hint"
+          >Click tooth to inspect &amp; partition zone</span
+        >
       </div>
     }
+  </div>
 
-    <!-- Dental Tooth Structure Breakdown & 4-Quadrant Color Mapping Panel -->
-    @if (selectedTooth(); as tooth) {
-      <div class="tooth-mapping-panel" (click)="$event.stopPropagation()">
-        <div class="mapping-panel-header">
-          <div class="tooth-badge-header">
-            <span class="tooth-pill">Tooth #{{ tooth.number }}</span>
-            <div class="tooth-info-meta">
-              <h3>{{ tooth.name }}</h3>
-              <span class="tooth-sub">{{ tooth.isUpper ? 'Upper Arch' : 'Lower Arch' }} · {{ tooth.type }}</span>
-            </div>
+  <!-- Dental Tooth Restorative & Virtual Try-In Panel -->
+  @if (selectedTooth(); as tooth) {
+    <div class="tooth-mapping-panel" (click)="$event.stopPropagation()">
+      <!-- Header -->
+      <div class="mapping-panel-header">
+        <div class="tooth-badge-header">
+          <span class="tooth-pill">Tooth #{{ tooth.number }}</span>
+          <div class="tooth-info-meta">
+            <h3>{{ tooth.name }}</h3>
+            <span class="tooth-sub"
+              >{{ tooth.isUpper ? "Upper Arch" : "Lower Arch" }} ·
+              {{ tooth.type }}</span
+            >
           </div>
-          <button type="button" class="close-panel-btn" (click)="closeToothPanel()" title="Close panel">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
+        </div>
+        <button
+          type="button"
+          class="close-panel-btn"
+          (click)="closeToothPanel()"
+          title="Close panel"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Step 1: Choose Tooth Division (تقسيم السنة) -->
+      <div class="panel-section">
+        <div class="section-title-row">
+          <span class="section-badge">1</span>
+          <span class="section-title">Choose Tooth Division</span>
+        </div>
+
+        <div class="partition-mode-row">
+          <button
+            type="button"
+            class="mode-btn"
+            [class.active]="divisionMode() === 1"
+            (click)="setDivisionMode(1)"
+          >
+            1 Part (Full)
+          </button>
+          <button
+            type="button"
+            class="mode-btn"
+            [class.active]="divisionMode() === 2"
+            (click)="setDivisionMode(2)"
+          >
+            2 Parts (Halves)
+          </button>
+          <button
+            type="button"
+            class="mode-btn"
+            [class.active]="divisionMode() === 3"
+            (click)="setDivisionMode(3)"
+          >
+            3 Parts (Thirds)
+          </button>
+          <button
+            type="button"
+            class="mode-btn"
+            [class.active]="divisionMode() === 4"
+            (click)="setDivisionMode(4)"
+          >
+            4 Parts (Quadrants)
           </button>
         </div>
 
-        <!-- Section 1: 4 Quadrants Selection -->
-        <div class="mapping-section-header">
-          <span class="mapping-title">White Enamel Structure (4 Quadrants)</span>
-          <button type="button" class="select-all-btn" (click)="selectAllQuadrants()">Select All 4</button>
+        <!-- Divider Grid Lines Toggle Switch -->
+        <div class="grid-toggle-row">
+          <label class="toggle-switch-label" for="gridLinesToggle">
+            <input
+              id="gridLinesToggle"
+              type="checkbox"
+              [checked]="showGridLines()"
+              (change)="toggleGridLines()"
+            />
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">Show Division Grid Lines on 3D Tooth</span>
+          </label>
         </div>
+      </div>
 
-        <div class="quadrants-grid">
-          <!-- Quadrant 1 (Top-Left) -->
-          <button type="button"
-                  class="quadrant-card"
-                  [class.selected]="selectedQuadrants().has('q1')"
-                  (click)="toggleQuadrant('q1')">
-            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q1') || '#FAF9F5'"></div>
-            <div class="quadrant-body">
-              <span class="quadrant-tag">Q1</span>
-              <span class="quadrant-label">Top-Left</span>
-              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q1') }}</span>
-            </div>
-            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q1')">✓</span>
-          </button>
-
-          <!-- Quadrant 2 (Top-Right) -->
-          <button type="button"
-                  class="quadrant-card"
-                  [class.selected]="selectedQuadrants().has('q2')"
-                  (click)="toggleQuadrant('q2')">
-            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q2') || '#FAF9F5'"></div>
-            <div class="quadrant-body">
-              <span class="quadrant-tag">Q2</span>
-              <span class="quadrant-label">Top-Right</span>
-              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q2') }}</span>
-            </div>
-            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q2')">✓</span>
-          </button>
-
-          <!-- Quadrant 3 (Bottom-Left) -->
-          <button type="button"
-                  class="quadrant-card"
-                  [class.selected]="selectedQuadrants().has('q3')"
-                  (click)="toggleQuadrant('q3')">
-            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q3') || '#FAF9F5'"></div>
-            <div class="quadrant-body">
-              <span class="quadrant-tag">Q3</span>
-              <span class="quadrant-label">Bottom-Left</span>
-              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q3') }}</span>
-            </div>
-            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q3')">✓</span>
-          </button>
-
-          <!-- Quadrant 4 (Bottom-Right) -->
-          <button type="button"
-                  class="quadrant-card"
-                  [class.selected]="selectedQuadrants().has('q4')"
-                  (click)="toggleQuadrant('q4')">
-            <div class="quadrant-color-bar" [style.background-color]="getQuadrantColor(tooth.number, 'q4') || '#FAF9F5'"></div>
-            <div class="quadrant-body">
-              <span class="quadrant-tag">Q4</span>
-              <span class="quadrant-label">Bottom-Right</span>
-              <span class="quadrant-shade-name">{{ getQuadrantColorName(tooth.number, 'q4') }}</span>
-            </div>
-            <span class="quadrant-check" [class.active]="selectedQuadrants().has('q4')">✓</span>
+      <!-- Step 2: Select Area to Treat (تحديد الجزء) -->
+      <div class="panel-section">
+        <div class="section-title-row">
+          <div class="section-title-left">
+            <span class="section-badge">2</span>
+            <span class="section-title">Select Area to Treat</span>
+          </div>
+          <button type="button" class="select-all-btn" (click)="selectAllParts()">
+            Select All
           </button>
         </div>
 
-        <!-- Section 2: Dental Shade & Color Application -->
-        <div class="mapping-section-header">
-          <span class="mapping-title">Apply Color to Selected Quadrant(s)</span>
+        <div class="tooth-parts-container">
+          <!-- Mode 1: 1 Whole Crown -->
+          @if (divisionMode() === 1) {
+            <button
+              type="button"
+              class="part-card full-card"
+              [class.selected]="isPartSelected('full')"
+              (click)="togglePart('full')"
+            >
+              <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'full')"></span>
+              <span class="part-label">Full Tooth Crown</span>
+              @if (isPartSelected('full')) {
+                <span class="part-check">✓</span>
+              }
+            </button>
+          }
+
+          <!-- Mode 2: 2 Halves -->
+          @if (divisionMode() === 2) {
+            <div class="halves-grid">
+              <button
+                type="button"
+                class="part-card"
+                [class.selected]="isPartSelected('left')"
+                (click)="togglePart('left')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'left')"></span>
+                <span class="part-label">Left Half</span>
+                @if (isPartSelected('left')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="part-card"
+                [class.selected]="isPartSelected('right')"
+                (click)="togglePart('right')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'right')"></span>
+                <span class="part-label">Right Half</span>
+                @if (isPartSelected('right')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+            </div>
+          }
+
+          <!-- Mode 3: 3 Thirds -->
+          @if (divisionMode() === 3) {
+            <div class="thirds-stack">
+              <button
+                type="button"
+                class="part-card horizontal-card"
+                [class.selected]="isPartSelected('top')"
+                (click)="togglePart('top')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'top')"></span>
+                <span class="part-label">Top Third</span>
+                @if (isPartSelected('top')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="part-card horizontal-card"
+                [class.selected]="isPartSelected('middle')"
+                (click)="togglePart('middle')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'middle')"></span>
+                <span class="part-label">Middle Third</span>
+                @if (isPartSelected('middle')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="part-card horizontal-card"
+                [class.selected]="isPartSelected('bottom')"
+                (click)="togglePart('bottom')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'bottom')"></span>
+                <span class="part-label">Bottom Third</span>
+                @if (isPartSelected('bottom')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+            </div>
+          }
+
+          <!-- Mode 4: 4 Quadrants -->
+          @if (divisionMode() === 4) {
+            <div class="quadrants-grid">
+              <button
+                type="button"
+                class="part-card"
+                [class.selected]="isPartSelected('q1')"
+                (click)="togglePart('q1')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'q1')"></span>
+                <span class="part-label">Q1 (Top-Left)</span>
+                @if (isPartSelected('q1')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="part-card"
+                [class.selected]="isPartSelected('q2')"
+                (click)="togglePart('q2')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'q2')"></span>
+                <span class="part-label">Q2 (Top-Right)</span>
+                @if (isPartSelected('q2')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="part-card"
+                [class.selected]="isPartSelected('q3')"
+                (click)="togglePart('q3')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'q3')"></span>
+                <span class="part-label">Q3 (Bottom-Left)</span>
+                @if (isPartSelected('q3')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+              <button
+                type="button"
+                class="part-card"
+                [class.selected]="isPartSelected('q4')"
+                (click)="togglePart('q4')"
+              >
+                <span class="part-color-indicator" [style.background-color]="getPartColor(tooth.number, 'q4')"></span>
+                <span class="part-label">Q4 (Bottom-Right)</span>
+                @if (isPartSelected('q4')) {
+                  <span class="part-check">✓</span>
+                }
+              </button>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Step 3: Apply Clinical Try-In / Shade (تطبيق اللون أو العلاج) -->
+      <div class="panel-section">
+        <div class="section-title-row">
+          <span class="section-badge">3</span>
+          <span class="section-title">Apply Clinical Try-In / Shade</span>
         </div>
 
-        <div class="shades-palette-grid">
+        <!-- Presets Grid -->
+        <div class="shades-chips-grid">
           @for (preset of shadePresets; track preset.code) {
-            <button type="button"
-                    class="shade-chip-btn"
-                    [title]="preset.name"
-                    (click)="applyColorToSelectedQuadrants(preset.hex)">
-              <span class="shade-color-circle" [style.background-color]="preset.hex"></span>
+            <button
+              type="button"
+              class="shade-chip"
+              [class.highlight-chip]="preset.code === 'Highlight'"
+              [title]="preset.name"
+              (click)="applyColor(preset.hex)"
+            >
+              <span class="shade-dot" [style.background-color]="preset.hex"></span>
               <span class="shade-code">{{ preset.code }}</span>
             </button>
           }
         </div>
 
-        <!-- Custom Color Picker Row -->
+        <!-- Custom Color Picker -->
         <div class="custom-color-row">
-          <label for="customToothColor">Custom Color:</label>
-          <div class="color-picker-input-wrap">
-            <input id="customToothColor"
-                   type="color"
-                   [ngModel]="activeColor()"
-                   (ngModelChange)="applyColorToSelectedQuadrants($event)" />
+          <span class="custom-color-label">Custom Color:</span>
+          <div class="color-picker-wrap">
+            <input
+              id="customToothColor"
+              type="color"
+              [ngModel]="activeColor()"
+              (ngModelChange)="applyColor($event)"
+            />
             <span class="hex-text">{{ activeColor() }}</span>
           </div>
         </div>
 
-        <!-- Actions Row -->
-        <div class="mapping-actions">
-          <button type="button" class="reset-tooth-action" (click)="resetCurrentTooth()">
-            Reset Tooth #{{ tooth.number }}
+        <!-- Actions -->
+        <div class="panel-reset-actions">
+          <button type="button" class="reset-btn tooth" (click)="resetCurrentTooth()">
+            Reset Selected Tooth
           </button>
-          @if (toothColors().size > 0) {
-            <button type="button" class="reset-all-action" (click)="resetAllTeeth()">
-              Reset All Teeth
-            </button>
-          }
+          <button type="button" class="reset-btn all" (click)="resetAllTeeth()">
+            Reset All
+          </button>
         </div>
       </div>
-    }
-  </div>
+    </div>
+  }
 
   <!-- <div class="viewer-pedestal">
     <div class="pedestal-top"></div>
     <div class="pedestal-body"></div>
   </div> -->
 
-  <div class="viewer-hint">
-    Drag to rotate · Scroll to zoom
-  </div>
+  <div class="viewer-hint">Drag to rotate · Scroll to zoom</div>
 </section>
