@@ -155,6 +155,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   readonly shadePresets = DENTAL_SHADE_PRESETS;
   private pointerDownCoord = { x: 0, y: 0, time: 0 };
   private toothBoundsMap = new Map<number, ToothEnamelBounds>();
+  private boundsCalibratedWithTexture = false;
 
   // Render-on-demand flags: nothing is drawn unless something actually changed.
   private needsRender = true;
@@ -435,14 +436,17 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   private prepareModel(model: THREE.Object3D): void {
+    this.toothBoundsMap.clear();
+    this.boundsCalibratedWithTexture = false;
+
     model.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (mesh.isMesh && mesh.geometry) {
         if (mesh.name === 'Group1014' || mesh.name === 'Group1059') {
           if (mesh.geometry.index !== null) {
             mesh.geometry = mesh.geometry.toNonIndexed();
-            mesh.geometry.computeVertexNormals();
           }
+          mesh.geometry = this.subdivideGeometry(mesh.geometry, 3);
         }
         if (!mesh.geometry.attributes['color']) {
           const count = mesh.geometry.attributes['position'].count;
@@ -900,6 +904,26 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   selectTooth(tooth: ToothData, clickedPoint?: { x: number; y: number; z: number }): void {
     this.ngZone.run(() => {
+      if (this.toothBoundsMap.size === 0) {
+        this.computeAllToothBounds();
+      }
+      // Anchor/snap tooth center to the true center of its white enamel crown
+      const bounds = this.toothBoundsMap.get(tooth.number);
+      if (bounds) {
+        this.dentalService.calibrateToothCenter(tooth.number, bounds.anchor, {
+          width: bounds.maxH - bounds.minH,
+          height: bounds.maxY - bounds.minY,
+        });
+      } else if (clickedPoint) {
+        const resolved = this.dentalService.identifyTooth(
+          clickedPoint.x,
+          clickedPoint.y,
+          clickedPoint.z,
+          tooth.isUpper
+        );
+        tooth = resolved;
+      }
+
       this.selectedTooth.set(tooth);
       const state = this.toothColors().get(tooth.number);
       if (state) {
@@ -1042,7 +1066,162 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Precomputes full-crown geometric boundaries across all white enamel triangles
+   * Subdivides each triangle of a non-indexed BufferGeometry into 4 sub-triangles per iteration
+   * (e.g. 3 iterations: 1 triangle -> 64 micro-triangles), interpolating position, normal, and uv
+   * at the 3 edge midpoints (m01, m12, m20) for razor-sharp CAD boundaries and outer edges.
+   */
+  private subdivideGeometry(geometry: THREE.BufferGeometry, iterations = 3): THREE.BufferGeometry {
+    let current = geometry;
+
+    for (let iter = 0; iter < iterations; iter++) {
+      const posAttr = current.attributes['position'] as THREE.BufferAttribute;
+      const normAttr = current.attributes['normal'] as THREE.BufferAttribute | undefined;
+      const uvAttr = current.attributes['uv'] as THREE.BufferAttribute | undefined;
+
+      const triCount = Math.floor(posAttr.count / 3);
+      const nextVertCount = triCount * 12; // 4 sub-triangles * 3 vertices
+
+      const srcPos = posAttr.array as Float32Array;
+      const dstPos = new Float32Array(nextVertCount * 3);
+
+      const srcNorm = normAttr ? (normAttr.array as Float32Array) : null;
+      const dstNorm = srcNorm ? new Float32Array(nextVertCount * 3) : null;
+
+      const srcUv = uvAttr ? (uvAttr.array as Float32Array) : null;
+      const dstUv = srcUv ? new Float32Array(nextVertCount * 2) : null;
+
+      let pOut = 0;
+      let nOut = 0;
+      let uOut = 0;
+
+      for (let t = 0; t < triCount; t++) {
+        const i0 = t * 3;
+        const i1 = i0 + 1;
+        const i2 = i0 + 2;
+
+        const p0 = i0 * 3, p1 = i1 * 3, p2 = i2 * 3;
+        const x0 = srcPos[p0], y0 = srcPos[p0 + 1], z0 = srcPos[p0 + 2];
+        const x1 = srcPos[p1], y1 = srcPos[p1 + 1], z1 = srcPos[p1 + 2];
+        const x2 = srcPos[p2], y2 = srcPos[p2 + 1], z2 = srcPos[p2 + 2];
+
+        const mx01 = 0.5 * (x0 + x1), my01 = 0.5 * (y0 + y1), mz01 = 0.5 * (z0 + z1);
+        const mx12 = 0.5 * (x1 + x2), my12 = 0.5 * (y1 + y2), mz12 = 0.5 * (z1 + z2);
+        const mx20 = 0.5 * (x2 + x0), my20 = 0.5 * (y2 + y0), mz20 = 0.5 * (z2 + z0);
+
+        // Sub-triangle 1: (v0, m01, m20)
+        dstPos[pOut++] = x0;   dstPos[pOut++] = y0;   dstPos[pOut++] = z0;
+        dstPos[pOut++] = mx01; dstPos[pOut++] = my01; dstPos[pOut++] = mz01;
+        dstPos[pOut++] = mx20; dstPos[pOut++] = my20; dstPos[pOut++] = mz20;
+
+        // Sub-triangle 2: (m01, v1, m12)
+        dstPos[pOut++] = mx01; dstPos[pOut++] = my01; dstPos[pOut++] = mz01;
+        dstPos[pOut++] = x1;   dstPos[pOut++] = y1;   dstPos[pOut++] = z1;
+        dstPos[pOut++] = mx12; dstPos[pOut++] = my12; dstPos[pOut++] = mz12;
+
+        // Sub-triangle 3: (m20, m12, v2)
+        dstPos[pOut++] = mx20; dstPos[pOut++] = my20; dstPos[pOut++] = mz20;
+        dstPos[pOut++] = mx12; dstPos[pOut++] = my12; dstPos[pOut++] = mz12;
+        dstPos[pOut++] = x2;   dstPos[pOut++] = y2;   dstPos[pOut++] = z2;
+
+        // Sub-triangle 4: (m01, m12, m20)
+        dstPos[pOut++] = mx01; dstPos[pOut++] = my01; dstPos[pOut++] = mz01;
+        dstPos[pOut++] = mx12; dstPos[pOut++] = my12; dstPos[pOut++] = mz12;
+        dstPos[pOut++] = mx20; dstPos[pOut++] = my20; dstPos[pOut++] = mz20;
+
+        if (srcNorm && dstNorm) {
+          const nx0 = srcNorm[p0], ny0 = srcNorm[p0 + 1], nz0 = srcNorm[p0 + 2];
+          const nx1 = srcNorm[p1], ny1 = srcNorm[p1 + 1], nz1 = srcNorm[p1 + 2];
+          const nx2 = srcNorm[p2], ny2 = srcNorm[p2 + 1], nz2 = srcNorm[p2 + 2];
+
+          let n01x = nx0 + nx1, n01y = ny0 + ny1, n01z = nz0 + nz1;
+          const l01 = Math.hypot(n01x, n01y, n01z) || 1;
+          n01x /= l01; n01y /= l01; n01z /= l01;
+
+          let n12x = nx1 + nx2, n12y = ny1 + ny2, n12z = nz1 + nz2;
+          const l12 = Math.hypot(n12x, n12y, n12z) || 1;
+          n12x /= l12; n12y /= l12; n12z /= l12;
+
+          let n20x = nx2 + nx0, n20y = ny2 + ny0, n20z = nz2 + nz0;
+          const l20 = Math.hypot(n20x, n20y, n20z) || 1;
+          n20x /= l20; n20y /= l20; n20z /= l20;
+
+          // Sub-triangle 1: (v0, m01, m20)
+          dstNorm[nOut++] = nx0;  dstNorm[nOut++] = ny0;  dstNorm[nOut++] = nz0;
+          dstNorm[nOut++] = n01x; dstNorm[nOut++] = n01y; dstNorm[nOut++] = n01z;
+          dstNorm[nOut++] = n20x; dstNorm[nOut++] = n20y; dstNorm[nOut++] = n20z;
+
+          // Sub-triangle 2: (m01, v1, m12)
+          dstNorm[nOut++] = n01x; dstNorm[nOut++] = n01y; dstNorm[nOut++] = n01z;
+          dstNorm[nOut++] = nx1;  dstNorm[nOut++] = ny1;  dstNorm[nOut++] = nz1;
+          dstNorm[nOut++] = n12x; dstNorm[nOut++] = n12y; dstNorm[nOut++] = n12z;
+
+          // Sub-triangle 3: (m20, m12, v2)
+          dstNorm[nOut++] = n20x; dstNorm[nOut++] = n20y; dstNorm[nOut++] = n20z;
+          dstNorm[nOut++] = n12x; dstNorm[nOut++] = n12y; dstNorm[nOut++] = n12z;
+          dstNorm[nOut++] = nx2;  dstNorm[nOut++] = ny2;  dstNorm[nOut++] = nz2;
+
+          // Sub-triangle 4: (m01, m12, m20)
+          dstNorm[nOut++] = n01x; dstNorm[nOut++] = n01y; dstNorm[nOut++] = n01z;
+          dstNorm[nOut++] = n12x; dstNorm[nOut++] = n12y; dstNorm[nOut++] = n12z;
+          dstNorm[nOut++] = n20x; dstNorm[nOut++] = n20y; dstNorm[nOut++] = n20z;
+        }
+
+        if (srcUv && dstUv) {
+          const u0 = i0 * 2, u1 = i1 * 2, u2 = i2 * 2;
+          const uvx0 = srcUv[u0], uvy0 = srcUv[u0 + 1];
+          const uvx1 = srcUv[u1], uvy1 = srcUv[u1 + 1];
+          const uvx2 = srcUv[u2], uvy2 = srcUv[u2 + 1];
+
+          const uv01x = 0.5 * (uvx0 + uvx1), uv01y = 0.5 * (uvy0 + uvy1);
+          const uv12x = 0.5 * (uvx1 + uvx2), uv12y = 0.5 * (uvy1 + uvy2);
+          const uv20x = 0.5 * (uvx2 + uvx0), uv20y = 0.5 * (uvy2 + uvy0);
+
+          // Sub-triangle 1: (v0, m01, m20)
+          dstUv[uOut++] = uvx0;  dstUv[uOut++] = uvy0;
+          dstUv[uOut++] = uv01x; dstUv[uOut++] = uv01y;
+          dstUv[uOut++] = uv20x; dstUv[uOut++] = uv20y;
+
+          // Sub-triangle 2: (m01, v1, m12)
+          dstUv[uOut++] = uv01x; dstUv[uOut++] = uv01y;
+          dstUv[uOut++] = uvx1;  dstUv[uOut++] = uvy1;
+          dstUv[uOut++] = uv12x; dstUv[uOut++] = uv12y;
+
+          // Sub-triangle 3: (m20, m12, v2)
+          dstUv[uOut++] = uv20x; dstUv[uOut++] = uv20y;
+          dstUv[uOut++] = uv12x; dstUv[uOut++] = uv12y;
+          dstUv[uOut++] = uvx2;  dstUv[uOut++] = uvy2;
+
+          // Sub-triangle 4: (m01, m12, m20)
+          dstUv[uOut++] = uv01x; dstUv[uOut++] = uv01y;
+          dstUv[uOut++] = uv12x; dstUv[uOut++] = uv12y;
+          dstUv[uOut++] = uv20x; dstUv[uOut++] = uv20y;
+        }
+      }
+
+      const nextGeo = new THREE.BufferGeometry();
+      nextGeo.setAttribute('position', new THREE.BufferAttribute(dstPos, 3));
+      if (dstNorm) {
+        nextGeo.setAttribute('normal', new THREE.BufferAttribute(dstNorm, 3));
+      }
+      if (dstUv) {
+        nextGeo.setAttribute('uv', new THREE.BufferAttribute(dstUv, 2));
+      }
+
+      if (current !== geometry) {
+        current.dispose();
+      }
+      current = nextGeo;
+    }
+
+    if (!current.attributes['normal']) {
+      current.computeVertexNormals();
+    }
+    return current;
+  }
+
+  /**
+   * Precomputes full-crown geometric boundaries across all white enamel triangles in each
+   * tooth's arch-aware local coordinate frame (archTangent, minH..maxH, minY..maxY)
    * so Q1..Q4, Halves, and Thirds cover 100% of the tooth surface edge-to-edge.
    */
   private computeAllToothBounds(): void {
@@ -1050,7 +1229,23 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const image = this.getDentalDiffuseImage();
     const sample = image ? this.getTextureSample(image) : null;
 
-    const accum = new Map<number, { minX: number; maxX: number; minY: number; maxY: number }>();
+    const accum = new Map<
+      number,
+      {
+        minX: number;
+        maxX: number;
+        minY: number;
+        maxY: number;
+        minZ: number;
+        maxZ: number;
+        minH: number;
+        maxH: number;
+        sumH: number;
+        sumY: number;
+        count: number;
+        archTangent: { x: number; z: number };
+      }
+    >();
 
     this.model.traverse((child) => {
       const mesh = child as THREE.Mesh;
@@ -1071,69 +1266,122 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         const cy = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
         const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
 
-        // Vertical gum cutoff
-        if (isUpper && cy > 4.5) continue;
-        if (!isUpper && cy < -14.6) continue;
+        // Deep vertical root cutoff
+        if (isUpper && cy > 6.8) continue;
+        if (!isUpper && cy < -16.5) continue;
 
-        // Texture check: skip gums
-        if (sample && uvAttr) {
+        if (uvAttr) {
           const cu = (uvAttr.getX(i0) + uvAttr.getX(i1) + uvAttr.getX(i2)) / 3;
           const cv = (uvAttr.getY(i0) + uvAttr.getY(i1) + uvAttr.getY(i2)) / 3;
-          const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
-          const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
-          const sIndex = (sy * sample.width + sx) * 4;
-          const r = sample.data[sIndex];
-          const g = sample.data[sIndex + 1];
-          const b = sample.data[sIndex + 2];
-          if (this.dentalService.isGumPixel(r, g, b)) {
-            continue;
+
+          // Exclude palate / floor-of-mouth UV islands outside the dental crown strips
+          if (isUpper && cv < 0.80) continue;
+          if (!isUpper && (cv < 0.67 || cu < 0.315)) continue;
+
+          // Texture check: skip only distinctly pink/reddish gum pixels
+          if (sample) {
+            const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
+            const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
+            const sIndex = (sy * sample.width + sx) * 4;
+            const r = sample.data[sIndex];
+            const g = sample.data[sIndex + 1];
+            const b = sample.data[sIndex + 2];
+            if (this.dentalService.isGumPixel(r, g, b)) {
+              continue;
+            }
           }
         }
 
         const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper);
         let b = accum.get(tooth.number);
         if (!b) {
-          b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+          const archTangent = this.dentalService.getArchTangent(tooth);
+          b = {
+            minX: Infinity,
+            maxX: -Infinity,
+            minY: Infinity,
+            maxY: -Infinity,
+            minZ: Infinity,
+            maxZ: -Infinity,
+            minH: Infinity,
+            maxH: -Infinity,
+            sumH: 0,
+            sumY: 0,
+            count: 0,
+            archTangent,
+          };
           accum.set(tooth.number, b);
         }
+
+        const h = cx * b.archTangent.x + cz * b.archTangent.z;
         b.minX = Math.min(b.minX, cx);
         b.maxX = Math.max(b.maxX, cx);
         b.minY = Math.min(b.minY, cy);
         b.maxY = Math.max(b.maxY, cy);
+        b.minZ = Math.min(b.minZ, cz);
+        b.maxZ = Math.max(b.maxZ, cz);
+        b.minH = Math.min(b.minH, h);
+        b.maxH = Math.max(b.maxH, h);
+        b.sumH += h;
+        b.sumY += cy;
+        b.count++;
       }
     });
 
     for (const [num, b] of accum.entries()) {
-      const tooth = this.dentalService.getTooth(num);
       const midX = (b.minX + b.maxX) / 2;
-      const midY = (b.minY + b.maxY) / 2;
+      const midZ = (b.minZ + b.maxZ) / 2;
+      const bboxMidY = (b.minY + b.maxY) / 2;
+      const meanY = b.count > 0 ? b.sumY / b.count : bboxMidY;
+      const midY = 0.5 * (bboxMidY + meanY);
+
+      const bboxMidH = (b.minH + b.maxH) / 2;
+      const meanH = b.count > 0 ? b.sumH / b.count : bboxMidH;
+      const midH = 0.5 * (bboxMidH + meanH);
+
+      const anchor = { x: midX, y: midY, z: midZ };
+      this.dentalService.calibrateToothCenter(num, anchor, {
+        width: b.maxH - b.minH,
+        height: b.maxY - b.minY,
+      });
+
       this.toothBoundsMap.set(num, {
         toothNumber: num,
         minX: b.minX,
         maxX: b.maxX,
         minY: b.minY,
         maxY: b.maxY,
+        minZ: b.minZ,
+        maxZ: b.maxZ,
         midX,
         midY,
-        anchor: tooth ? tooth.center : { x: midX, y: midY, z: 0 }
+        midZ,
+        minH: b.minH,
+        maxH: b.maxH,
+        midH,
+        archTangent: b.archTangent,
+        anchor,
       });
     }
+
+    this.boundsCalibratedWithTexture = !!sample;
   }
 
   /**
-   * Colors the dental meshes triangle-by-triangle (3 non-indexed vertices per triangle)
+   * Colors the dental meshes triangle-by-triangle (3 non-indexed vertices per micro-triangle)
    * so every triangle has a single uniform color. This eliminates GPU gradient blur
-   * and creates razor-sharp CAD-like boundaries between quadrants.
+   * and creates razor-sharp CAD-like boundaries between quadrants and outer tooth borders.
    */
   updateMeshVertexColors(): void {
     if (!this.model) return;
 
-    if (this.toothBoundsMap.size === 0) {
+    const image = this.getDentalDiffuseImage();
+    const sample = image ? this.getTextureSample(image) : null;
+
+    if (this.toothBoundsMap.size === 0 || (!this.boundsCalibratedWithTexture && sample)) {
       this.computeAllToothBounds();
     }
 
-    const image = this.getDentalDiffuseImage();
-    const sample = image ? this.getTextureSample(image) : null;
     const statesMap = this.toothColors();
     const selectedTooth = this.selectedTooth();
     const showGrid = this.showGridLines();
@@ -1167,42 +1415,50 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         const cy = (pos.getY(i0) + pos.getY(i1) + pos.getY(i2)) / 3;
         const cz = (pos.getZ(i0) + pos.getZ(i1) + pos.getZ(i2)) / 3;
 
-        // 1. Spatial vertical gum cutoff
-        if (isUpper && cy > 4.5) {
+        // 1. Deep vertical root cutoff
+        if (isUpper && cy > 6.8) {
           this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
           continue;
         }
-        if (!isUpper && cy < -14.6) {
+        if (!isUpper && cy < -16.5) {
           this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
           continue;
         }
 
-        // 2. Texture gum filter
-        if (sample && uvAttr) {
+        // 2. UV tooth-strip & pink gum filter (never rejects shaded enamel pits/grooves)
+        if (uvAttr) {
           const cu = (uvAttr.getX(i0) + uvAttr.getX(i1) + uvAttr.getX(i2)) / 3;
           const cv = (uvAttr.getY(i0) + uvAttr.getY(i1) + uvAttr.getY(i2)) / 3;
-          const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
-          const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
-          const sIndex = (sy * sample.width + sx) * 4;
-          const r = sample.data[sIndex];
-          const g = sample.data[sIndex + 1];
-          const b = sample.data[sIndex + 2];
-          if (this.dentalService.isGumPixel(r, g, b)) {
+
+          if ((isUpper && cv < 0.80) || (!isUpper && (cv < 0.67 || cu < 0.315))) {
             this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
             continue;
           }
+
+          if (sample) {
+            const sx = Math.min(sample.width - 1, Math.max(0, Math.floor(cu * sample.width)));
+            const sy = Math.min(sample.height - 1, Math.max(0, Math.floor((1.0 - cv) * sample.height)));
+            const sIndex = (sy * sample.width + sx) * 4;
+            const r = sample.data[sIndex];
+            const g = sample.data[sIndex + 1];
+            const b = sample.data[sIndex + 2];
+            if (this.dentalService.isGumPixel(r, g, b)) {
+              this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
+              continue;
+            }
+          }
         }
 
-        // 3. Closest tooth assignment
+        // 3. Interproximal-aware tooth assignment
         const tooth = this.dentalService.identifyTooth(cx, cy, cz, isUpper);
         const state = statesMap.get(tooth.number);
         const isToothSelected = selectedTooth?.number === tooth.number;
         const mode = isToothSelected ? activeMode : (state?.divisionMode ?? 4);
         const bounds = this.toothBoundsMap.get(tooth.number);
 
-        // 4. Divider grid lines for active selected tooth
+        // 4. Divider grid lines for active selected tooth in arch-aware local frame
         if (isToothSelected && showGrid && mode !== 1) {
-          if (this.dentalService.isNearBoundary(cx, cy, tooth, mode, bounds)) {
+          if (this.dentalService.isNearBoundary(cx, cy, tooth, mode, bounds, cz)) {
             // Crisp CAD grid line: pure white [1, 1, 1]
             this.setTriangleColor(colorArray, i0, i1, i2, 1.0, 1.0, 1.0);
             continue;
@@ -1216,7 +1472,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
             const third = this.dentalService.getThird(cy, tooth, bounds);
             colorHex = state.zones[third];
           } else {
-            const quad = this.dentalService.getQuadrant(cx, cy, tooth, bounds);
+            const quad = this.dentalService.getQuadrant(cx, cy, tooth, bounds, cz);
             colorHex = state.zones[quad];
           }
 
@@ -1368,10 +1624,14 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const isUpper = mesh.name === 'Group1059';
     const localPt = mesh.worldToLocal(hit.point.clone());
 
-    // Spatial vertical cutoff:
-    // Upper arch gums/palate are at y > 5.5; Lower arch gums/floor are at y < -15.5
-    if (isUpper && localPt.y > 5.5) return true;
-    if (!isUpper && localPt.y < -15.5) return true;
+    // Deep vertical root cutoff:
+    // Upper arch gums/palate are at y > 6.8; Lower arch gums/floor are at y < -16.5
+    if (isUpper && localPt.y > 6.8) return true;
+    if (!isUpper && localPt.y < -16.5) return true;
+
+    // UV tooth-strip check: reject palate and floor-of-mouth UV regions
+    if (isUpper && hit.uv.y < 0.80) return true;
+    if (!isUpper && (hit.uv.y < 0.67 || hit.uv.x < 0.315)) return true;
 
     const material = Array.isArray(mesh.material)
       ? mesh.material[hit.face?.materialIndex ?? 0]
