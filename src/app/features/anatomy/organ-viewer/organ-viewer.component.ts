@@ -149,9 +149,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   readonly selectedTooth = signal<ToothData | null>(null);
   readonly divisionMode = signal<DivisionMode>(4);
   readonly selectedParts = signal<Set<string>>(new Set(['q1', 'q2', 'q3', 'q4']));
-  readonly showGridLines = signal<boolean>(true);
+  readonly showGridLines = signal<boolean>(this.dentalService.loadGridLinesPreference());
   readonly activeColor = signal<string>('#4A9CFF');
-  readonly toothColors = signal<Map<number, ToothState>>(new Map());
+  readonly toothColors = signal<Map<number, ToothState>>(this.dentalService.loadToothStates());
   readonly shadePresets = DENTAL_SHADE_PRESETS;
   private pointerDownCoord = { x: 0, y: 0, time: 0 };
   private toothBoundsMap = new Map<number, ToothEnamelBounds>();
@@ -342,6 +342,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       // OBJ + MTL: textures are still streaming in, the loading manager ends the loading state.
       if (!waitForTextures) {
         this.isLoading.set(false);
+        if (this.isDentalModel()) {
+          this.updateMeshVertexColors();
+        }
       }
 
       this.requestRender();
@@ -946,18 +949,21 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const tooth = this.selectedTooth();
     if (tooth) {
       const toothMap = new Map(this.toothColors());
-      const state = toothMap.get(tooth.number);
-      if (state) {
-        state.divisionMode = mode;
-        toothMap.set(tooth.number, { ...state });
-        this.toothColors.set(toothMap);
-      }
+      const state: ToothState = toothMap.get(tooth.number) ?? {
+        divisionMode: mode,
+        zones: {},
+      };
+      state.divisionMode = mode;
+      toothMap.set(tooth.number, { ...state });
+      this.toothColors.set(toothMap);
+      this.dentalService.saveToothStates(toothMap);
     }
     this.updateMeshVertexColors();
   }
 
   toggleGridLines(): void {
     this.showGridLines.update(v => !v);
+    this.dentalService.saveGridLinesPreference(this.showGridLines());
     this.updateMeshVertexColors();
   }
 
@@ -1032,6 +1038,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     toothMap.set(tooth.number, state);
     this.toothColors.set(toothMap);
+    this.dentalService.saveToothStates(toothMap);
     this.updateMeshVertexColors();
   }
 
@@ -1057,11 +1064,14 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const toothMap = new Map(this.toothColors());
     toothMap.delete(tooth.number);
     this.toothColors.set(toothMap);
+    this.dentalService.saveToothStates(toothMap);
     this.updateMeshVertexColors();
   }
 
   resetAllTeeth(): void {
-    this.toothColors.set(new Map());
+    const emptyMap = new Map<number, ToothState>();
+    this.toothColors.set(emptyMap);
+    this.dentalService.saveToothStates(emptyMap);
     this.updateMeshVertexColors();
   }
 

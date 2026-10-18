@@ -1,9 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Injectable, PLATFORM_ID, inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import {
   TEETH_CATALOG,
   ToothData,
   ToothQuadrant,
   DivisionMode,
+  ToothState,
 } from '../models/dental.model';
 
 export interface ToothEnamelBounds {
@@ -95,6 +97,9 @@ const LOWER_ARCH_CREASES: readonly ArchCreasePlane[] = [
   providedIn: 'root'
 })
 export class DentalService {
+  private readonly platformId = inject(PLATFORM_ID);
+  private readonly STORAGE_KEY_STATES = 'anatomy_dental_tooth_states';
+  private readonly STORAGE_KEY_GRID = 'anatomy_dental_show_grid_lines';
   private readonly teeth = TEETH_CATALOG;
 
   /**
@@ -341,5 +346,71 @@ export class DentalService {
       ((num >> 8) & 255) / 255,
       (num & 255) / 255
     ];
+  }
+
+  /**
+   * Saves all tooth segmentation modes and zone colorings to localStorage.
+   */
+  saveToothStates(states: Map<number, ToothState>): void {
+    if (!isPlatformBrowser(this.platformId)) return;
+    try {
+      const serialized: Record<number, ToothState> = {};
+      for (const [toothNumber, state] of states.entries()) {
+        serialized[toothNumber] = {
+          divisionMode: state.divisionMode,
+          zones: { ...state.zones },
+        };
+      }
+      localStorage.setItem(this.STORAGE_KEY_STATES, JSON.stringify(serialized));
+    } catch (error) {
+      console.error('Failed to save dental tooth states to localStorage', error);
+    }
+  }
+
+  /**
+   * Loads saved tooth segmentation modes and zone colorings from localStorage.
+   */
+  loadToothStates(): Map<number, ToothState> {
+    const map = new Map<number, ToothState>();
+    if (!isPlatformBrowser(this.platformId)) return map;
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY_STATES);
+      if (!raw) return map;
+      const parsed = JSON.parse(raw) as Record<string, ToothState>;
+      for (const [key, state] of Object.entries(parsed)) {
+        const num = Number(key);
+        if (Number.isFinite(num) && state && typeof state === 'object') {
+          map.set(num, {
+            divisionMode: (state.divisionMode ?? 4) as DivisionMode,
+            zones: state.zones && typeof state.zones === 'object' ? { ...state.zones } : {},
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load dental tooth states from localStorage', error);
+    }
+    return map;
+  }
+
+  saveGridLinesPreference(show: boolean): void {
+    if (!isPlatformBrowser(this.platformId)) return;
+    try {
+      localStorage.setItem(this.STORAGE_KEY_GRID, JSON.stringify(show));
+    } catch (error) {
+      console.error('Failed to save dental grid lines preference to localStorage', error);
+    }
+  }
+
+  loadGridLinesPreference(): boolean {
+    if (!isPlatformBrowser(this.platformId)) return true;
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY_GRID);
+      if (raw !== null) {
+        return Boolean(JSON.parse(raw));
+      }
+    } catch (error) {
+      console.error('Failed to load dental grid lines preference from localStorage', error);
+    }
+    return true;
   }
 }
