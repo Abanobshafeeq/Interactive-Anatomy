@@ -82,5 +82,62 @@
         </div>
       </section>
     }
+
+    <section class="info-section">
+      <div class="captures-header">
+        <h3>Saved Captures (ORIGAN-INFO)</h3>
+        @if (organScreenshots().length > 0) {
+          <span class="captures-count">{{ organScreenshots().length }}</span>
+        }
+      </div>
+
+      @if (organScreenshots().length > 0) {
+        <div class="captures-list">
+          @for (shot of organScreenshots(); track shot.id) {
+            <article class="capture-card">
+              <div class="capture-thumb-wrap">
+                <img
+                  class="capture-thumb"
+                  [src]="shot.imageDataUrl"
+                  [alt]="shot.organName + ' screenshot'"
+                />
+              </div>
+
+              <div class="capture-meta">
+                <div class="capture-meta-top">
+                  <strong>{{ shot.focusedPart || 'Camera View' }}</strong>
+                  <span>{{ shot.capturedAt | date: 'shortTime' }}</span>
+                </div>
+
+                <div class="capture-actions">
+                  <button
+                    type="button"
+                    class="capture-btn"
+                    (click)="downloadScreenshot(shot)"
+                    title="Download Screenshot"
+                  >
+                    Download
+                  </button>
+                  <button
+                    type="button"
+                    class="capture-btn delete"
+                    (click)="deleteScreenshot(shot.id)"
+                    title="Remove from ORIGAN-INFO"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="fact" style="justify-content: center;">
+          <span style="text-align: center; width: 100%;">
+            No screenshots saved for {{ organ().name }} yet.
+          </span>
+        </div>
+      }
+    </section>
   </div>
 </aside>

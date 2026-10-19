@@ -17,4 +17,18 @@ export interface Organ {
   model: string;
   hotspots?: Hotspot[];
   clickableMeshes?: string[];
-}
+}
+
+export interface OrganScreenshot {
+  id: string;
+  organId: string;
+  organName: string;
+  imageDataUrl: string;
+  capturedAt: string;
+  focusedPart?: string;
+  camera: {
+    position: { x: number; y: number; z: number };
+    target: { x: number; y: number; z: number };
+  };
+}
+

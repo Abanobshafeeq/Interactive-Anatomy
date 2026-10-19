@@ -50,6 +50,31 @@
         }
       </button>
 
+      <button
+        type="button"
+        class="screenshot-btn"
+        (click)="captureScreenshot($event)"
+        title="Capture screenshot of current camera view (saves to ORIGAN-INFO)"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"
+          />
+          <circle cx="12" cy="13" r="3" />
+        </svg>
+        <span>Screenshot</span>
+      </button>
+
       <button type="button" (click)="resetCamera()">Reset</button>
 
       <button type="button" (click)="toggleAutoRotate()">Auto Rotate</button>
@@ -549,10 +574,195 @@
     </div>
   }
 
-  <!-- <div class="viewer-pedestal">
-    <div class="pedestal-top"></div>
-    <div class="pedestal-body"></div>
-  </div> -->
+  <!--Shutter Flash Effect when capturing a screenshot-->
+  @if (isCapturingFlash()) {
+    <div class="capture-flash-overlay"></div>
+  }
 
-  <div class="viewer-hint">Drag to rotate · Scroll to zoom</div>
+  <!-- Modern Floating Camera Control HUD (Up, Down, Left, Right, Recenter, Zoom, Quick Capture) -->
+  <div
+    class="camera-nav-hud"
+    (click)="$event.stopPropagation()"
+    aria-label="Camera Movement Controls"
+  >
+    <div class="camera-dpad" role="group" aria-label="Directional Camera Pad">
+      <!-- UP -->
+      <button
+        type="button"
+        class="dpad-btn dpad-up"
+        [class.active]="activeCameraAction() === 'up'"
+        (pointerdown)="startCameraControl('up', $event)"
+        (pointerup)="stopCameraControl($event)"
+        (pointerleave)="stopCameraControl($event)"
+        (pointercancel)="stopCameraControl($event)"
+        (keydown.enter)="nudgeCamera('up', $event)"
+        (keydown.space)="nudgeCamera('up', $event)"
+        title="Move Camera Up"
+        aria-label="Move Camera Up"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+      </button>
+
+      <!-- LEFT -->
+      <button
+        type="button"
+        class="dpad-btn dpad-left"
+        [class.active]="activeCameraAction() === 'left'"
+        (pointerdown)="startCameraControl('left', $event)"
+        (pointerup)="stopCameraControl($event)"
+        (pointerleave)="stopCameraControl($event)"
+        (pointercancel)="stopCameraControl($event)"
+        (keydown.enter)="nudgeCamera('left', $event)"
+        (keydown.space)="nudgeCamera('left', $event)"
+        title="Move Camera Left"
+        aria-label="Move Camera Left"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- CENTER / RECENTER TARGET -->
+      <button
+        type="button"
+        class="dpad-btn dpad-center"
+        (click)="recenterCamera($event)"
+        title="Center Camera Target"
+        aria-label="Center Camera Target"
+      >
+        <span class="dpad-center-dot"></span>
+      </button>
+
+      <!-- RIGHT -->
+      <button
+        type="button"
+        class="dpad-btn dpad-right"
+        [class.active]="activeCameraAction() === 'right'"
+        (pointerdown)="startCameraControl('right', $event)"
+        (pointerup)="stopCameraControl($event)"
+        (pointerleave)="stopCameraControl($event)"
+        (pointercancel)="stopCameraControl($event)"
+        (keydown.enter)="nudgeCamera('right', $event)"
+        (keydown.space)="nudgeCamera('right', $event)"
+        title="Move Camera Right"
+        aria-label="Move Camera Right"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- DOWN -->
+      <button
+        type="button"
+        class="dpad-btn dpad-down"
+        [class.active]="activeCameraAction() === 'down'"
+        (pointerdown)="startCameraControl('down', $event)"
+        (pointerup)="stopCameraControl($event)"
+        (pointerleave)="stopCameraControl($event)"
+        (pointercancel)="stopCameraControl($event)"
+        (keydown.enter)="nudgeCamera('down', $event)"
+        (keydown.space)="nudgeCamera('down', $event)"
+        title="Move Camera Down"
+        aria-label="Move Camera Down"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+    </div>
+
+    <div class="camera-aux-controls">
+      <button
+        type="button"
+        class="aux-cam-btn"
+        [class.active]="activeCameraAction() === 'zoomIn'"
+        (pointerdown)="startCameraControl('zoomIn', $event)"
+        (pointerup)="stopCameraControl($event)"
+        (pointerleave)="stopCameraControl($event)"
+        (pointercancel)="stopCameraControl($event)"
+        (keydown.enter)="nudgeCamera('zoomIn', $event)"
+        (keydown.space)="nudgeCamera('zoomIn', $event)"
+        title="Zoom In on Current View"
+        aria-label="Zoom In"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        class="aux-cam-btn"
+        [class.active]="activeCameraAction() === 'zoomOut'"
+        (pointerdown)="startCameraControl('zoomOut', $event)"
+        (pointerup)="stopCameraControl($event)"
+        (pointerleave)="stopCameraControl($event)"
+        (pointercancel)="stopCameraControl($event)"
+        (keydown.enter)="nudgeCamera('zoomOut', $event)"
+        (keydown.space)="nudgeCamera('zoomOut', $event)"
+        title="Zoom Out"
+        aria-label="Zoom Out"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+
+      <div class="aux-divider"></div>
+
+      <button
+        type="button"
+        class="aux-cam-btn capture-quick-btn"
+        (click)="captureScreenshot($event)"
+        title="Take Screenshot of Current View (saves to ORIGAN-INFO)"
+        aria-label="Take Screenshot"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+          <circle cx="12" cy="13" r="3" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Screenshot Saved Toast Notification -->
+  @if (lastCapturedScreenshot(); as shot) {
+    <div class="screenshot-toast" (click)="$event.stopPropagation()">
+      <img
+        class="screenshot-toast-thumb"
+        [src]="shot.imageDataUrl"
+        [alt]="shot.organName + ' screenshot'"
+      />
+      <div class="screenshot-toast-body">
+        <div class="screenshot-toast-tag">
+          <span class="screenshot-saved-dot"></span>
+          <span>SAVED · ORIGAN-INFO</span>
+        </div>
+        <strong>{{ shot.organName }}</strong>
+        <span class="screenshot-toast-sub">{{ shot.focusedPart }}</span>
+        <div class="screenshot-toast-actions">
+          <button
+            type="button"
+            class="toast-action-btn"
+            (click)="downloadScreenshot(shot, $event)"
+          >
+            Download
+          </button>
+          <button
+            type="button"
+            class="toast-dismiss-btn"
+            (click)="dismissScreenshotToast($event)"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div class="viewer-hint">Drag to rotate · Right-drag or D-Pad to move · Scroll to zoom</div>
 </section>

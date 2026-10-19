@@ -29,8 +29,9 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-import { Organ, Hotspot } from '../../../core/models/organ.model';
+import { Organ, Hotspot, OrganScreenshot } from '../../../core/models/organ.model';
 import { HotspotStorageService } from '../../../core/services/hotspot-storage.service';
+import { OrganScreenshotService } from '../../../core/services/organ-screenshot.service';
 import {
   ToothData,
   ToothQuadrant,
@@ -40,6 +41,8 @@ import {
   DentalShadePreset,
 } from '../../../core/models/dental.model';
 import { DentalService, ToothEnamelBounds } from '../../../core/services/dental.service';
+
+export type CameraControlAction = 'up' | 'down' | 'left' | 'right' | 'zoomIn' | 'zoomOut';
 
 export interface Hotspot2D {
   data: Hotspot;
@@ -65,6 +68,8 @@ type TextureImage = CanvasImageSource & { width: number; height: number };
 
 /** Largest dimension of the CPU texture copy; colour classification doesn't need full resolution. */
 const MAX_TEXTURE_SAMPLE_SIZE = 1024;
+/** Largest dimension of a captured screenshot stored in localStorage. */
+const MAX_SCREENSHOT_DIMENSION = 1200;
 /** Camera has to move this far (squared) before an occlusion raycast is redone. */
 const OCCLUSION_RECHECK_DIST_SQ = 0.02;
 /** Fallback outward-normal origin for hotspots without an explicit normal (model space). */
@@ -131,7 +136,17 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   /** User's auto-rotate preference; actual rotation is paused while interacting with points. */
   private readonly autoRotateEnabled = signal(false);
 
+  /** Active continuous camera control action while the user holds a navigation button. */
+  readonly activeCameraAction = signal<CameraControlAction | null>(null);
+
+  /** Screenshot visual feedback state. */
+  readonly isCapturingFlash = signal(false);
+  readonly lastCapturedScreenshot = signal<OrganScreenshot | null>(null);
+  private toastTimeoutId?: ReturnType<typeof setTimeout>;
+  private flashTimeoutId?: ReturnType<typeof setTimeout>;
+
   private readonly hotspotStorage = inject(HotspotStorageService);
+  private readonly screenshotService = inject(OrganScreenshotService);
   private readonly dentalService = inject(DentalService);
   private readonly ngZone = inject(NgZone);
 
@@ -181,6 +196,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private readonly tmpProjected = new THREE.Vector3();
   private readonly tmpUv = new THREE.Vector2();
   private readonly tmpNormalMatrix = new THREE.Matrix3();
+  private readonly tmpPanRight = new THREE.Vector3();
+  private readonly tmpPanUp = new THREE.Vector3();
+  private readonly tmpPanDelta = new THREE.Vector3();
 
   constructor() {
     effect(() => {
@@ -251,9 +269,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
 
-    this.controls.enablePan = false;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.panSpeed = 0.85;
 
-    this.controls.minDistance = 1.5;
+    this.controls.minDistance = 0.4;
     this.controls.maxDistance = 8;
 
     this.controls.autoRotateSpeed = 1.5;
@@ -551,6 +571,263 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.needsHotspotUpdate = true;
   }
 
+  /** Recenters the camera target on the model origin while preserving the current orbit angle and zoom distance. */
+  recenterCamera(event?: Event): void {
+    event?.stopPropagation();
+    if (!this.camera || !this.controls) {
+      return;
+    }
+    this.camera.position.sub(this.controls.target);
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+    this.requestRender();
+    this.needsHotspotUpdate = true;
+  }
+
+  private cameraHoldStartTime = 0;
+
+  /** Starts a directional pan or zoom action on pointerdown (performs an immediate step + continues smoothly while held). */
+  startCameraControl(action: CameraControlAction, event?: Event): void {
+    event?.stopPropagation();
+    event?.preventDefault();
+    this.cameraHoldStartTime = performance.now();
+    this.applyCameraControlStep(action, 1.0);
+    this.activeCameraAction.set(action);
+  }
+
+  /** Stops continuous camera movement on pointerup/pointerleave. */
+  stopCameraControl(event?: Event): void {
+    event?.stopPropagation();
+    if (this.activeCameraAction() !== null) {
+      this.activeCameraAction.set(null);
+    }
+  }
+
+  /** Keyboard-accessible single step for camera directional buttons. */
+  nudgeCamera(action: CameraControlAction, event?: Event): void {
+    event?.stopPropagation();
+    this.applyCameraControlStep(action, 1.0);
+  }
+
+  private applyCameraControlStep(action: CameraControlAction, stepMultiplier: number): void {
+    switch (action) {
+      case 'up':
+        this.panCameraBy(0, 1 * stepMultiplier);
+        break;
+      case 'down':
+        this.panCameraBy(0, -1 * stepMultiplier);
+        break;
+      case 'left':
+        this.panCameraBy(-1 * stepMultiplier, 0);
+        break;
+      case 'right':
+        this.panCameraBy(1 * stepMultiplier, 0);
+        break;
+      case 'zoomIn':
+        this.zoomCameraBy(1 - 0.07 * stepMultiplier);
+        break;
+      case 'zoomOut':
+        this.zoomCameraBy(1 + 0.08 * stepMultiplier);
+        break;
+    }
+  }
+
+  /**
+   * Translates both `camera.position` and `controls.target` in the camera's local screen plane
+   * (right / up vectors), so subsequent zooming focuses directly on the newly centered region.
+   */
+  private panCameraBy(dx: number, dy: number): void {
+    if (!this.camera || !this.controls) {
+      return;
+    }
+
+    this.camera.updateMatrixWorld();
+    const dist = Math.max(0.4, this.camera.position.distanceTo(this.controls.target));
+    const panStep = dist * 0.025;
+
+    this.tmpPanRight.setFromMatrixColumn(this.camera.matrixWorld, 0).multiplyScalar(dx * panStep);
+    this.tmpPanUp.setFromMatrixColumn(this.camera.matrixWorld, 1).multiplyScalar(dy * panStep);
+    this.tmpPanDelta.copy(this.tmpPanRight).add(this.tmpPanUp);
+
+    // Clamp target within a generous radius so the organ remains reachable
+    const nextTarget = this.tmpViewDir.copy(this.controls.target).add(this.tmpPanDelta);
+    if (nextTarget.length() <= 3.2) {
+      this.controls.target.add(this.tmpPanDelta);
+      this.camera.position.add(this.tmpPanDelta);
+      this.controls.update();
+      this.requestRender();
+      this.needsHotspotUpdate = true;
+    }
+  }
+
+  /** Zooms the camera toward or away from the current `controls.target`. */
+  private zoomCameraBy(factor: number): void {
+    if (!this.camera || !this.controls) {
+      return;
+    }
+
+    const offset = this.tmpViewDir.subVectors(this.camera.position, this.controls.target);
+    const currentDist = offset.length();
+    if (currentDist <= 0) {
+      return;
+    }
+
+    const nextDist = THREE.MathUtils.clamp(
+      currentDist * factor,
+      this.controls.minDistance,
+      this.controls.maxDistance
+    );
+
+    offset.normalize().multiplyScalar(nextDist);
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.controls.update();
+    this.requestRender();
+    this.needsHotspotUpdate = true;
+  }
+
+  /**
+   * Captures a high-resolution screenshot of the exact part of the object currently in the camera's view
+   * (compositing the studio backdrop, rendered WebGL frame, and visible hotspot markers) and persists it
+   * to localStorage under "ORIGAN-INFO".
+   */
+  captureScreenshot(event?: Event): void {
+    event?.stopPropagation();
+    if (!this.renderer || !this.scene || !this.camera || !this.controls) {
+      return;
+    }
+
+    // 1. Synchronously render the current scene state so the WebGL framebuffer is fresh
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+    this.needsRender = false;
+
+    const glCanvas = this.renderer.domElement;
+    const srcW = glCanvas.width || this.viewWidth;
+    const srcH = glCanvas.height || this.viewHeight;
+    const scale = Math.min(1, MAX_SCREENSHOT_DIMENSION / Math.max(srcW, srcH, 1));
+    const outW = Math.max(1, Math.round(srcW * scale));
+    const outH = Math.max(1, Math.round(srcH * scale));
+
+    const compositeCanvas = document.createElement('canvas');
+    compositeCanvas.width = outW;
+    compositeCanvas.height = outH;
+    const ctx = compositeCanvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+
+    // 2. Paint the exact studio radial-gradient backdrop seen by the user
+    const gradCx = outW * 0.5;
+    const gradCy = outH * 0.42;
+    const gradRadius = Math.hypot(outW, outH) * 0.65;
+    const gradient = ctx.createRadialGradient(gradCx, gradCy, 0, gradCx, gradCy, gradRadius);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
+    gradient.addColorStop(0.45, 'rgba(255, 250, 243, 0.94)');
+    gradient.addColorStop(1, 'rgba(247, 237, 225, 1)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, outW, outH);
+
+    // 3. Draw the 3D WebGL view
+    ctx.drawImage(glCanvas, 0, 0, outW, outH);
+
+    // 4. Composite visible 2D hotspot markers onto the screenshot
+    const cssToOutX = outW / Math.max(1, this.viewWidth);
+    const cssToOutY = outH / Math.max(1, this.viewHeight);
+    for (const hotspot of this.hotspots2D()) {
+      if (!hotspot.visible) continue;
+      const hx = hotspot.x * cssToOutX;
+      const hy = hotspot.y * cssToOutY;
+      const dotRadius = 6 * Math.min(cssToOutX, cssToOutY);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(hx, hy, dotRadius + 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(hx, hy, dotRadius, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.lineWidth = Math.max(2, 3.5 * Math.min(cssToOutX, cssToOutY));
+      ctx.strokeStyle = hotspot.data.isCustom ? '#4a90d9' : '#f37b68';
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 5. Encode using modern WebP format (with PNG fallback)
+    let imageDataUrl = compositeCanvas.toDataURL('image/webp', 0.9);
+    if (!imageDataUrl.startsWith('data:image/webp')) {
+      imageDataUrl = compositeCanvas.toDataURL('image/png');
+    }
+
+    // 6. Determine context label for the focused region
+    const organ = this.organ();
+    const tooth = this.selectedTooth();
+    const hotspot = this.activeHotspot();
+    let focusedPart = 'Current Camera View';
+    if (tooth) {
+      focusedPart = `Tooth #${tooth.number} · ${tooth.name}`;
+    } else if (hotspot) {
+      focusedPart = hotspot.name;
+    } else if (this.controls.target.lengthSq() > 0.01) {
+      focusedPart = 'Focused Region View';
+    }
+
+    const saved = this.screenshotService.saveScreenshot({
+      organId: organ.id,
+      organName: organ.name,
+      imageDataUrl,
+      focusedPart,
+      camera: {
+        position: {
+          x: Number(this.camera.position.x.toFixed(3)),
+          y: Number(this.camera.position.y.toFixed(3)),
+          z: Number(this.camera.position.z.toFixed(3)),
+        },
+        target: {
+          x: Number(this.controls.target.x.toFixed(3)),
+          y: Number(this.controls.target.y.toFixed(3)),
+          z: Number(this.controls.target.z.toFixed(3)),
+        },
+      },
+    });
+
+    // 7. Trigger shutter flash and toast preview
+    this.isCapturingFlash.set(true);
+    if (this.flashTimeoutId) {
+      clearTimeout(this.flashTimeoutId);
+    }
+    this.flashTimeoutId = setTimeout(() => {
+      this.isCapturingFlash.set(false);
+    }, 260);
+
+    this.lastCapturedScreenshot.set(saved);
+    if (this.toastTimeoutId) {
+      clearTimeout(this.toastTimeoutId);
+    }
+    this.toastTimeoutId = setTimeout(() => {
+      this.lastCapturedScreenshot.set(null);
+    }, 5500);
+  }
+
+  dismissScreenshotToast(event?: Event): void {
+    event?.stopPropagation();
+    if (this.toastTimeoutId) {
+      clearTimeout(this.toastTimeoutId);
+    }
+    this.lastCapturedScreenshot.set(null);
+  }
+
+  downloadScreenshot(screenshot: OrganScreenshot, event?: Event): void {
+    event?.stopPropagation();
+    const link = document.createElement('a');
+    const ext = screenshot.imageDataUrl.startsWith('data:image/webp') ? 'webp' : 'png';
+    link.href = screenshot.imageDataUrl;
+    link.download = `${screenshot.organId}-${screenshot.id}.${ext}`;
+    link.click();
+  }
+
   toggleAutoRotate(): void {
     this.autoRotateEnabled.update(enabled => !enabled);
   }
@@ -596,6 +873,12 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   private animate = (): void => {
     this.animationId = requestAnimationFrame(this.animate);
+
+    // Continuous smooth camera movement while a directional or zoom button is held down (>180ms).
+    const activeAction = this.activeCameraAction();
+    if (activeAction && performance.now() - this.cameraHoldStartTime > 180) {
+      this.applyCameraControlStep(activeAction, 0.2);
+    }
 
     // Pointer moves are coalesced to at most one raycast per frame.
     if (this.pendingPointerMove) {
@@ -1626,6 +1909,13 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     cancelAnimationFrame(this.animationId);
+
+    if (this.toastTimeoutId) {
+      clearTimeout(this.toastTimeoutId);
+    }
+    if (this.flashTimeoutId) {
+      clearTimeout(this.flashTimeoutId);
+    }
 
     ++this.modelRequestId;
 

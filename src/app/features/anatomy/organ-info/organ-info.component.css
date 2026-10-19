@@ -131,3 +131,127 @@
   display: inline-block;
   flex-shrink: 0;
 }
+
+.captures-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.captures-header h3 {
+  margin: 0;
+}
+
+.captures-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(235, 124, 107, 0.14);
+  color: var(--coral, #d65a47);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.captures-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.capture-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 13px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.48);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.capture-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(45, 32, 22, 0.06);
+}
+
+.capture-thumb-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid rgba(117, 91, 70, 0.16);
+  background: #f7ede1;
+}
+
+.capture-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.capture-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.capture-meta-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.capture-meta-top strong {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.capture-meta-top span {
+  color: var(--muted);
+  font-size: 9.5px;
+  flex-shrink: 0;
+}
+
+.capture-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.capture-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.capture-btn:hover {
+  background: rgba(253, 234, 226, 0.85);
+}
+
+.capture-btn.delete {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.22);
+}
+
+.capture-btn.delete:hover {
+  background: rgba(254, 226, 226, 0.75);
+  border-color: rgba(220, 38, 38, 0.4);
+}
