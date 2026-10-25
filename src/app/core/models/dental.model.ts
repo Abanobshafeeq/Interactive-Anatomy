@@ -13,17 +13,22 @@ export interface ToothState {
   zones: Record<string, string>; // Maps 'q1'..'q4' or 'top'..'bottom' to hex color
 }
 
-export interface ToothData {
+export interface ToothCatalogEntry {
   number: number;
   name: string;
   isUpper: boolean;
   type: 'Incisor' | 'Canine' | 'Premolar' | 'Molar';
-  center: { x: number; y: number; z: number };
+  center?: { x: number; y: number; z: number };
   extents?: ToothExtents;
 }
 
-export const TEETH_CATALOG: Record<number, ToothData> = {
-  1: { number: 1, name: 'Upper Right 3rd Molar', isUpper: true, type: 'Molar', center: { x: -25.95, y: 1.69, z: -4.80 }, extents: { width: 9.8, height: 8.3 } },
+export interface ToothData extends ToothCatalogEntry {
+  center: { x: number; y: number; z: number };
+}
+
+// Universal numbering: wisdom teeth remain catalog entries but have no geometry in teeth.OBJ.
+export const TEETH_CATALOG: Record<number, ToothCatalogEntry> = {
+  1: { number: 1, name: 'Upper Right 3rd Molar', isUpper: true, type: 'Molar' },
   2: { number: 2, name: 'Upper Right 2nd Molar', isUpper: true, type: 'Molar', center: { x: -25.95, y: 1.69, z: -4.80 }, extents: { width: 9.8, height: 8.3 } },
   3: { number: 3, name: 'Upper Right 1st Molar', isUpper: true, type: 'Molar', center: { x: -24.31, y: 0.66, z: 4.73 }, extents: { width: 9.2, height: 9.4 } },
   4: { number: 4, name: 'Upper Right 2nd Premolar', isUpper: true, type: 'Premolar', center: { x: -22.65, y: -0.42, z: 12.97 }, extents: { width: 7.8, height: 8.8 } },
@@ -38,8 +43,8 @@ export const TEETH_CATALOG: Record<number, ToothData> = {
   13: { number: 13, name: 'Upper Left 2nd Premolar', isUpper: true, type: 'Premolar', center: { x: 22.60, y: -0.44, z: 13.13 }, extents: { width: 7.8, height: 8.7 } },
   14: { number: 14, name: 'Upper Left 1st Molar', isUpper: true, type: 'Molar', center: { x: 24.27, y: 0.60, z: 4.74 }, extents: { width: 9.2, height: 9.5 } },
   15: { number: 15, name: 'Upper Left 2nd Molar', isUpper: true, type: 'Molar', center: { x: 25.94, y: 1.64, z: -4.80 }, extents: { width: 9.8, height: 8.4 } },
-  16: { number: 16, name: 'Upper Left 3rd Molar', isUpper: true, type: 'Molar', center: { x: 25.94, y: 1.64, z: -4.80 }, extents: { width: 9.8, height: 8.4 } },
-  17: { number: 17, name: 'Lower Left 3rd Molar', isUpper: false, type: 'Molar', center: { x: 24.39, y: -7.82, z: -5.43 }, extents: { width: 9.5, height: 8.5 } },
+  16: { number: 16, name: 'Upper Left 3rd Molar', isUpper: true, type: 'Molar' },
+  17: { number: 17, name: 'Lower Left 3rd Molar', isUpper: false, type: 'Molar' },
   18: { number: 18, name: 'Lower Left 2nd Molar', isUpper: false, type: 'Molar', center: { x: 24.39, y: -7.82, z: -5.43 }, extents: { width: 9.5, height: 8.5 } },
   19: { number: 19, name: 'Lower Left 1st Molar', isUpper: false, type: 'Molar', center: { x: 21.88, y: -9.05, z: 3.05 }, extents: { width: 9.1, height: 8.7 } },
   20: { number: 20, name: 'Lower Left 2nd Premolar', isUpper: false, type: 'Premolar', center: { x: 19.14, y: -9.53, z: 11.76 }, extents: { width: 7.5, height: 8.1 } },
@@ -54,8 +59,11 @@ export const TEETH_CATALOG: Record<number, ToothData> = {
   29: { number: 29, name: 'Lower Right 2nd Premolar', isUpper: false, type: 'Premolar', center: { x: -19.15, y: -9.55, z: 11.76 }, extents: { width: 7.5, height: 8.1 } },
   30: { number: 30, name: 'Lower Right 1st Molar', isUpper: false, type: 'Molar', center: { x: -21.89, y: -9.06, z: 3.06 }, extents: { width: 9.1, height: 8.7 } },
   31: { number: 31, name: 'Lower Right 2nd Molar', isUpper: false, type: 'Molar', center: { x: -24.41, y: -7.83, z: -5.43 }, extents: { width: 9.5, height: 8.5 } },
-  32: { number: 32, name: 'Lower Right 3rd Molar', isUpper: false, type: 'Molar', center: { x: -24.41, y: -7.83, z: -5.43 }, extents: { width: 9.5, height: 8.5 } }
+  32: { number: 32, name: 'Lower Right 3rd Molar', isUpper: false, type: 'Molar' }
 };
+
+export const MODEL_TEETH: ToothData[] = Object.values(TEETH_CATALOG)
+  .filter((tooth): tooth is ToothData => tooth.center !== undefined);
 
 export interface DentalShadePreset {
   name: string;

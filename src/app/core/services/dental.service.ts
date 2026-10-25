@@ -2,11 +2,13 @@ import { Injectable, PLATFORM_ID, inject } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import {
   TEETH_CATALOG,
+  MODEL_TEETH,
   ToothData,
   ToothQuadrant,
   DivisionMode,
   ToothState,
 } from '../models/dental.model';
+import { isHexColor, isRecord } from '../models/storage-validation';
 
 export interface ToothEnamelBounds {
   toothNumber: number;
@@ -100,7 +102,7 @@ export class DentalService {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly STORAGE_KEY_STATES = 'anatomy_dental_tooth_states';
   private readonly STORAGE_KEY_GRID = 'anatomy_dental_show_grid_lines';
-  private readonly teeth = TEETH_CATALOG;
+  private readonly teeth: Record<number, ToothData> = Object.fromEntries(MODEL_TEETH.map(tooth => [tooth.number, tooth]));
 
   /**
    * Gum vs Enamel pixel classification:
@@ -336,6 +338,7 @@ export class DentalService {
   }
 
   hexToRgb(hex: string): [number, number, number] {
+    if (!isHexColor(hex)) return [1, 1, 1];
     let clean = hex.replace('#', '');
     if (clean.length === 3) {
       clean = clean.split('').map(c => c + c).join('');
@@ -351,19 +354,19 @@ export class DentalService {
   /**
    * Saves all tooth segmentation modes and zone colorings to localStorage.
    */
-  saveToothStates(states: Map<number, ToothState>): void {
-    if (!isPlatformBrowser(this.platformId)) return;
+  saveToothStates(states: Map<number, ToothState>): boolean {
+    if (!isPlatformBrowser(this.platformId)) return false;
     try {
       const serialized: Record<number, ToothState> = {};
       for (const [toothNumber, state] of states.entries()) {
-        serialized[toothNumber] = {
-          divisionMode: state.divisionMode,
-          zones: { ...state.zones },
-        };
+        const valid = this.validateToothState(toothNumber, state);
+        if (valid) serialized[toothNumber] = valid;
       }
       localStorage.setItem(this.STORAGE_KEY_STATES, JSON.stringify(serialized));
+      return true;
     } catch (error) {
       console.error('Failed to save dental tooth states to localStorage', error);
+      return false;
     }
   }
 
@@ -376,15 +379,12 @@ export class DentalService {
     try {
       const raw = localStorage.getItem(this.STORAGE_KEY_STATES);
       if (!raw) return map;
-      const parsed = JSON.parse(raw) as Record<string, ToothState>;
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) return map;
       for (const [key, state] of Object.entries(parsed)) {
         const num = Number(key);
-        if (Number.isFinite(num) && state && typeof state === 'object') {
-          map.set(num, {
-            divisionMode: (state.divisionMode ?? 4) as DivisionMode,
-            zones: state.zones && typeof state.zones === 'object' ? { ...state.zones } : {},
-          });
-        }
+        const valid = this.validateToothState(num, state);
+        if (valid && String(num) === key) map.set(num, valid);
       }
     } catch (error) {
       console.error('Failed to load dental tooth states from localStorage', error);
@@ -392,12 +392,30 @@ export class DentalService {
     return map;
   }
 
-  saveGridLinesPreference(show: boolean): void {
-    if (!isPlatformBrowser(this.platformId)) return;
+  private validateToothState(toothNumber: number, state: unknown): ToothState | null {
+    if (!Number.isInteger(toothNumber) || !Object.hasOwn(TEETH_CATALOG, toothNumber) || !isRecord(state)) return null;
+    const mode = state['divisionMode'] ?? 4;
+    if (mode !== 1 && mode !== 2 && mode !== 3 && mode !== 4) return null;
+    const zones: Record<string, string> = {};
+    if (isRecord(state['zones'])) {
+      // Both families can coexist when users switch division modes.
+      for (const [key, color] of Object.entries(state['zones'])) {
+        if (['q1', 'q2', 'q3', 'q4', 'top', 'middle', 'bottom'].includes(key) && isHexColor(color)) {
+          zones[key] = color;
+        }
+      }
+    }
+    return { divisionMode: mode, zones };
+  }
+
+  saveGridLinesPreference(show: boolean): boolean {
+    if (!isPlatformBrowser(this.platformId)) return false;
     try {
       localStorage.setItem(this.STORAGE_KEY_GRID, JSON.stringify(show));
+      return true;
     } catch (error) {
       console.error('Failed to save dental grid lines preference to localStorage', error);
+      return false;
     }
   }
 
@@ -406,7 +424,8 @@ export class DentalService {
     try {
       const raw = localStorage.getItem(this.STORAGE_KEY_GRID);
       if (raw !== null) {
-        return Boolean(JSON.parse(raw));
+        const parsed: unknown = JSON.parse(raw);
+        return typeof parsed === 'boolean' ? parsed : true;
       }
     } catch (error) {
       console.error('Failed to load dental grid lines preference from localStorage', error);

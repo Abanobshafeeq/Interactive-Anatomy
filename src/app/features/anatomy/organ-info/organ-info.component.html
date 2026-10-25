@@ -8,6 +8,9 @@
   </div>
 
   <div class="info-content">
+    @if (screenshotError(); as error) {
+      <p role="alert">{{ error }}</p>
+    }
     <section class="info-section">
       <h3>Overview</h3>
 

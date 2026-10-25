@@ -1,29 +1,31 @@
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { provideRouter, Router, RouterOutlet } from '@angular/router';
 import { AppComponent } from './app.component';
+import { routes } from './app.routes';
+import { OrganViewerComponent } from './features/anatomy/organ-viewer/organ-viewer.component';
 
 describe('AppComponent', () => {
   beforeEach(async () => {
+    spyOn(OrganViewerComponent.prototype, 'ngAfterViewInit').and.stub();
     await TestBed.configureTestingModule({
-      imports: [AppComponent],
+      imports: [AppComponent], providers: [provideRouter(routes)],
     }).compileComponents();
   });
 
-  it('should create the app', () => {
-    const fixture = TestBed.createComponent(AppComponent);
-    const app = fixture.componentInstance;
-    expect(app).toBeTruthy();
-  });
-
-  it(`should have the 'anatomy-angular' title`, () => {
-    const fixture = TestBed.createComponent(AppComponent);
-    const app = fixture.componentInstance;
-    expect(app.title).toEqual('anatomy-angular');
-  });
-
-  it('should render title', () => {
+  it('renders the router outlet', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('Hello, anatomy-angular');
+    expect(fixture.debugElement.query(By.directive(RouterOutlet))).toBeTruthy();
+  });
+
+  it('redirects the initial route and loads the anatomy page', async () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    await TestBed.inject(Router).navigateByUrl('/');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(TestBed.inject(Router).url).toBe('/anatomy');
+    expect(fixture.nativeElement.querySelector('app-anatomy-page')).toBeTruthy();
+    expect(fixture.nativeElement.textContent).toContain('Brain');
   });
 });

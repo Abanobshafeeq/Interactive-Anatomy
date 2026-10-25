@@ -28,6 +28,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .viewer-label {
@@ -57,6 +59,8 @@
 
 .viewer-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 6px;
 }
 
@@ -890,6 +894,11 @@
 
 .toggle-switch-label input:checked + .toggle-slider {
   background-color: #2f2a27;
+}
+
+.toggle-switch-label input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--lavender);
+  outline-offset: 3px;
 }
 
 .toggle-switch-label input:checked + .toggle-slider::before {

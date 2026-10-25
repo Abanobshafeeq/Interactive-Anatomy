@@ -1,4 +1,12 @@
 <div class="anatomy-page">
+  <label class="mobile-organ-picker">
+    Organ
+    <select [value]="selectedOrgan().id" (change)="selectOrganById($any($event.target).value)">
+      @for (organ of organs; track organ.id) {
+        <option [value]="organ.id">{{ organ.name }}</option>
+      }
+    </select>
+  </label>
   <!-- <header class="app-header">
     <div class="brand">
       <div>

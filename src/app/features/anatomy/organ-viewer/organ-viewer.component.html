@@ -53,6 +53,7 @@
       <button
         type="button"
         class="screenshot-btn"
+        [disabled]="isLoading() || !!loadError()"
         (click)="captureScreenshot($event)"
         title="Capture screenshot of current camera view (saves to ORIGAN-INFO)"
       >
@@ -82,6 +83,12 @@
   </div>
 
   <div #canvasContainer class="viewer-content" (click)="clearHotspot()">
+    @if (loadError(); as error) {
+      <div class="loading-overlay" role="alert">
+        <span>{{ error }}</span>
+        <button type="button" (click)="retryLoad(); $event.stopPropagation()">Retry</button>
+      </div>
+    }
     @if (isLoading()) {
       <div class="loading-overlay">
         <div class="spinner"></div>
@@ -101,6 +108,8 @@
         >
           <button
             class="hotspot-dot"
+            type="button"
+            [attr.aria-label]="hotspot.data.name"
             [class.custom]="hotspot.data.isCustom"
             (click)="selectHotspot(hotspot.data); $event.stopPropagation()"
           ></button>
@@ -140,6 +149,7 @@
                 }
                 <button
                   class="close-btn"
+                  aria-label="Close point details"
                   (click)="clearHotspot(); $event.stopPropagation()"
                 >
                   <svg
@@ -164,13 +174,14 @@
                 <div class="input-group">
                   <input
                     type="number"
+                    [attr.aria-label]="hotspot.data.name + ' stored data'"
                     [(ngModel)]="hotspot.data.value"
                     placeholder="Enter numerical data..."
                   />
                   <button
                     type="button"
                     class="save-btn"
-                    (click)="clearHotspot(); $event.stopPropagation()"
+                    (click)="saveHotspotValue(hotspot.data); $event.stopPropagation()"
                   >
                     Save
                   </button>
@@ -191,6 +202,7 @@
               <h4>New Custom Point</h4>
               <button
                 class="close-btn"
+                aria-label="Cancel point placement"
                 (click)="cancelPlacement(); $event.stopPropagation()"
               >
                 <svg
@@ -554,6 +566,7 @@
             <input
               id="customToothColor"
               type="color"
+              aria-label="Custom tooth color"
               [ngModel]="activeColor()"
               (ngModelChange)="applyColor($event)"
             />
@@ -717,6 +730,7 @@
       <button
         type="button"
         class="aux-cam-btn capture-quick-btn"
+        [disabled]="isLoading() || !!loadError()"
         (click)="captureScreenshot($event)"
         title="Take Screenshot of Current View (saves to ORIGAN-INFO)"
         aria-label="Take Screenshot"
@@ -730,6 +744,12 @@
   </div>
 
   <!-- Screenshot Saved Toast Notification -->
+  @if (storageError(); as error) {
+    <div class="screenshot-toast" role="alert" (click)="$event.stopPropagation()">
+      <span>{{ error }}</span>
+      <button type="button" class="toast-dismiss-btn" (click)="storageError.set(null)">Dismiss</button>
+    </div>
+  }
   @if (lastCapturedScreenshot(); as shot) {
     <div class="screenshot-toast" (click)="$event.stopPropagation()">
       <img

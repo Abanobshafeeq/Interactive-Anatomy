@@ -16,6 +16,7 @@
     <input
       type="text"
       placeholder="Search organs..."
+      aria-label="Search organs"
       (input)="updateSearchTerm($any($event.target).value)"
     />
   </div>
@@ -49,6 +50,8 @@
           ›
         </span>
       </button>
+    } @empty {
+      <p role="status">No organs match your search.</p>
     }
   </div>
 </aside>

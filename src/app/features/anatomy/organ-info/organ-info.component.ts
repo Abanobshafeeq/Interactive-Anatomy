@@ -1,4 +1,4 @@
-import { Component, computed, inject, input } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Organ, OrganScreenshot } from '../../../core/models/organ.model';
 import { OrganScreenshotService } from '../../../core/services/organ-screenshot.service';
@@ -14,6 +14,7 @@ export class OrganInfoComponent {
   private readonly screenshotService = inject(OrganScreenshotService);
 
   readonly organ = input.required<Organ>();
+  readonly screenshotError = signal<string | null>(null);
 
   readonly organScreenshots = computed(() =>
     this.screenshotService
@@ -37,7 +38,8 @@ export class OrganInfoComponent {
   }
 
   deleteScreenshot(id: string): void {
-    this.screenshotService.deleteScreenshot(id);
+    this.screenshotError.set(this.screenshotService.deleteScreenshot(id)
+      ? null : 'Screenshot was not deleted. Browser storage is unavailable.');
   }
 }
 

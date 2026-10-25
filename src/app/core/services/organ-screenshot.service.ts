@@ -1,6 +1,7 @@
 import { Injectable, PLATFORM_ID, inject, signal } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { OrganScreenshot } from '../models/organ.model';
+import { isFiniteVector, isRecord } from '../models/storage-validation';
 
 @Injectable({
   providedIn: 'root',
@@ -20,7 +21,7 @@ export class OrganScreenshotService {
   readonly screenshots = this._screenshots.asReadonly();
 
   /** Saves a new screenshot entry to the front of the list and persists it under "ORIGAN-INFO". */
-  saveScreenshot(entry: Omit<OrganScreenshot, 'id' | 'capturedAt'>): OrganScreenshot {
+  saveScreenshot(entry: Omit<OrganScreenshot, 'id' | 'capturedAt'>): OrganScreenshot | null {
     const record: OrganScreenshot = {
       ...entry,
       id: `capture-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -32,8 +33,8 @@ export class OrganScreenshotService {
       OrganScreenshotService.MAX_STORED_SCREENSHOTS
     );
 
-    const persisted = this.persistToStorage(updated);
-    this._screenshots.set(persisted);
+    if (!this.persistToStorage(updated)) return null;
+    this._screenshots.set(updated);
     return record;
   }
 
@@ -43,19 +44,21 @@ export class OrganScreenshotService {
   }
 
   /** Deletes a specific screenshot by ID and updates "ORIGAN-INFO" in localStorage. */
-  deleteScreenshot(id: string): void {
+  deleteScreenshot(id: string): boolean {
     const updated = this._screenshots().filter((item) => item.id !== id);
-    const persisted = this.persistToStorage(updated);
-    this._screenshots.set(persisted);
+    if (!this.persistToStorage(updated)) return false;
+    this._screenshots.set(updated);
+    return true;
   }
 
   /** Clears all saved screenshots for a specific organ (or all organs if omitted). */
-  clearScreenshots(organId?: string): void {
+  clearScreenshots(organId?: string): boolean {
     const updated = organId
       ? this._screenshots().filter((item) => item.organId !== organId)
       : [];
-    const persisted = this.persistToStorage(updated);
-    this._screenshots.set(persisted);
+    if (!this.persistToStorage(updated)) return false;
+    this._screenshots.set(updated);
+    return true;
   }
 
   private loadScreenshots(): OrganScreenshot[] {
@@ -70,10 +73,15 @@ export class OrganScreenshotService {
       }
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed as OrganScreenshot[];
+        const ids = new Set<string>();
+        return parsed.filter((item): item is OrganScreenshot => {
+          if (!this.isScreenshot(item) || ids.has(item.id)) return false;
+          ids.add(item.id);
+          return true;
+        });
       }
-      if (parsed && typeof parsed === 'object' && 'imageDataUrl' in parsed) {
-        return [parsed as OrganScreenshot];
+      if (this.isScreenshot(parsed)) {
+        return [parsed];
       }
     } catch (error) {
       console.error('Failed to read ORIGAN-INFO from localStorage:', error);
@@ -82,36 +90,31 @@ export class OrganScreenshotService {
     return [];
   }
 
-  private persistToStorage(items: OrganScreenshot[]): OrganScreenshot[] {
+  private isScreenshot(value: unknown): value is OrganScreenshot {
+    return isRecord(value) &&
+      ['id', 'organId', 'organName'].every(key => typeof value[key] === 'string' && value[key].trim().length > 0) &&
+      typeof value['imageDataUrl'] === 'string' && /^data:image\/(png|webp);base64,/.test(value['imageDataUrl']) &&
+      typeof value['capturedAt'] === 'string' && Number.isFinite(Date.parse(value['capturedAt'])) &&
+      (value['focusedPart'] === undefined || typeof value['focusedPart'] === 'string') &&
+      isRecord(value['camera']) && isFiniteVector(value['camera']['position']) && isFiniteVector(value['camera']['target']);
+  }
+
+  private persistToStorage(items: OrganScreenshot[]): boolean {
     if (!isPlatformBrowser(this.platformId)) {
-      return items;
+      return false;
     }
 
-    const list = [...items];
-    while (list.length > 0) {
-      try {
-        localStorage.setItem(OrganScreenshotService.STORAGE_KEY, JSON.stringify(list));
-        return list;
-      } catch (error) {
-        // If localStorage quota is exceeded, drop the oldest capture and retry
-        if (list.length > 1) {
-          list.pop();
-        } else {
-          console.error('Failed to save screenshot to localStorage (ORIGAN-INFO):', error);
-          break;
-        }
-      }
-    }
-
-    if (list.length === 0) {
-      try {
+    try {
+      if (items.length === 0) {
         localStorage.removeItem(OrganScreenshotService.STORAGE_KEY);
-      } catch {
-        // Ignore storage removal errors
+      } else {
+        localStorage.setItem(OrganScreenshotService.STORAGE_KEY, JSON.stringify(items));
       }
+      return true;
+    } catch (error) {
+      console.error('Failed to save screenshot to localStorage (ORIGAN-INFO):', error);
+      return false;
     }
-
-    return list;
   }
 }
 

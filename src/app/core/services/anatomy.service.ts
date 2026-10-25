@@ -195,7 +195,7 @@ export class AnatomyService {
   {
      id: 'teeth-obj',
     name: 'Teeth (OBJ)',
-    description: 'Human teeth in OBJ format.',
+    description: '28-tooth model using Universal numbering. Wisdom teeth #1, #16, #17, and #32 are not present.',
     function: 'Structural support and protection',
     image: '/anatomy/teeth/teeth.png',
     model: '/models/teeth.OBJ',

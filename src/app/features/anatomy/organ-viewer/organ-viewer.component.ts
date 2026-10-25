@@ -41,6 +41,7 @@ import {
   DentalShadePreset,
 } from '../../../core/models/dental.model';
 import { DentalService, ToothEnamelBounds } from '../../../core/services/dental.service';
+import { isHexColor } from '../../../core/models/storage-validation';
 
 export type CameraControlAction = 'up' | 'down' | 'left' | 'right' | 'zoomIn' | 'zoomOut';
 
@@ -106,7 +107,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private model?: THREE.Object3D;
   /** The organ whose model is currently loaded / loading. Guards against duplicate loads. */
   private loadedOrgan?: Organ;
-  private animationId = 0;
+  private animationId: number | null = null;
+  private frameInProgress = false;
+  private destroyed = false;
   private resizeObserver?: ResizeObserver;
   private viewWidth = 1;
   private viewHeight = 1;
@@ -122,6 +125,8 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private modelRequestId = 0;
 
   readonly isLoading = signal(false);
+  readonly loadError = signal<string | null>(null);
+  readonly storageError = signal<string | null>(null);
 
   readonly hotspots2D = signal<Hotspot2D[]>([]);
   readonly activeHotspot = signal<Hotspot | null>(null);
@@ -206,7 +211,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
       untracked(() => {
         // Scene not ready yet (ngAfterViewInit does the first load), or this organ is already loaded.
-        if (!this.scene || organ === this.loadedOrgan) {
+        if (!this.scene || !this.renderer || !this.controls || organ === this.loadedOrgan) {
           return;
         }
 
@@ -221,15 +226,22 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
       if (this.controls) {
         this.controls.autoRotate = shouldRotate;
+        this.requestRender();
       }
     });
   }
 
   ngAfterViewInit(): void {
     this.ngZone.runOutsideAngular(() => {
-      this.initScene();
-      this.loadModel(this.organ());
-      this.animate();
+      try {
+        this.initScene();
+        this.loadModel(this.organ());
+        this.requestRender();
+      } catch (error) {
+        this.isLoading.set(false);
+        this.loadError.set('The 3D viewer could not start. Check that WebGL is available and reload.');
+        console.error('Failed to initialize anatomy viewer:', error);
+      }
     });
   }
 
@@ -326,6 +338,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     this.resetInteractionState();
     this.clearHotspotState();
+    this.hotspots2D.set([]);
+    this.pendingPointerMove = null;
+    this.activeCameraAction.set(null);
+    this.loadError.set(null);
+    this.storageError.set(null);
 
     if (this.model) {
       this.scene.remove(this.model);
@@ -351,7 +368,9 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
       // Load custom hotspots and merge them
       const customHotspots = this.hotspotStorage.loadCustomHotspots(organ.id);
-      organ.hotspots = (organ.hotspots ?? []).filter(h => !h.isCustom).concat(customHotspots);
+      const builtInHotspots = (organ.hotspots ?? []).filter(h => !h.isCustom);
+      const builtInIds = new Set(builtInHotspots.map(h => h.id));
+      organ.hotspots = builtInHotspots.concat(customHotspots.filter(h => !builtInIds.has(h.id)));
 
       for (const hotspot of organ.hotspots) {
         this.registerHotspot(hotspot);
@@ -376,6 +395,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         return;
       }
       this.isLoading.set(false);
+      this.loadError.set(`Unable to load ${organ.name}. Please try again.`);
       console.error('Failed to load anatomy model:', error);
     };
 
@@ -399,6 +419,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       );
     } else {
       this.isLoading.set(false);
+      this.loadError.set('This model format is not supported.');
       console.error('Unsupported model format:', path);
     }
   }
@@ -414,9 +435,20 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     // Dedicated manager so we know when the MTL textures have finished loading.
     const manager = new THREE.LoadingManager();
+    let ownedMaterials: THREE.Material[] = [];
+    let transferred = false;
+    let failed = false;
+    const fail = (error: unknown) => {
+      failed = true;
+      onError(error);
+    };
     manager.onProgress = () => this.requestRender();
     manager.onLoad = () => {
-      if (this.model && requestId === this.modelRequestId) {
+      if (!transferred && (failed || requestId !== this.modelRequestId)) {
+        this.disposeMaterials(ownedMaterials);
+        ownedMaterials = [];
+      }
+      if (!failed && this.model && requestId === this.modelRequestId) {
         this.model.visible = true;
         this.isLoading.set(false);
         if (this.isDentalModel()) {
@@ -436,6 +468,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
           return;
         }
         materials.preload();
+        ownedMaterials = Object.values(materials.materials);
         for (const mat of Object.values(materials.materials)) {
           mat.vertexColors = true;
         }
@@ -443,9 +476,10 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
         const loader = new OBJLoader(manager);
         loader.setMaterials(materials);
         loader.load(path, (obj) => {
+          transferred = true;
           obj.visible = false; // Hide until textures are fully loaded
           onLoad(obj, true);
-        }, undefined, onError);
+        }, undefined, fail);
       },
       undefined,
       (error) => {
@@ -467,9 +501,17 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       if (mesh.isMesh && mesh.geometry) {
         if (mesh.name === 'Group1014' || mesh.name === 'Group1059') {
           if (mesh.geometry.index !== null) {
+            const original = mesh.geometry;
             mesh.geometry = mesh.geometry.toNonIndexed();
+            original.disposeBoundsTree?.();
+            original.dispose();
           }
-          mesh.geometry = this.subdivideGeometry(mesh.geometry, 3);
+          const original = mesh.geometry;
+          mesh.geometry = this.subdivideGeometry(original, 3);
+          if (mesh.geometry !== original) {
+            original.disposeBoundsTree?.();
+            original.dispose();
+          }
         }
         if (!mesh.geometry.attributes['color']) {
           const count = mesh.geometry.attributes['position'].count;
@@ -593,6 +635,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.cameraHoldStartTime = performance.now();
     this.applyCameraControlStep(action, 1.0);
     this.activeCameraAction.set(action);
+    this.requestRender();
   }
 
   /** Stops continuous camera movement on pointerup/pointerleave. */
@@ -606,6 +649,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   /** Keyboard-accessible single step for camera directional buttons. */
   nudgeCamera(action: CameraControlAction, event?: Event): void {
     event?.stopPropagation();
+    event?.preventDefault();
     this.applyCameraControlStep(action, 1.0);
   }
 
@@ -692,13 +736,25 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
    */
   captureScreenshot(event?: Event): void {
     event?.stopPropagation();
-    if (!this.renderer || !this.scene || !this.camera || !this.controls) {
+    this.storageError.set(null);
+    this.lastCapturedScreenshot.set(null);
+    try {
+      this.createScreenshot();
+    } catch (error) {
+      this.storageError.set('Screenshot could not be captured. Please try again.');
+      console.error('Failed to capture screenshot:', error);
+    }
+  }
+
+  private createScreenshot(): void {
+    if (!this.renderer || !this.scene || !this.camera || !this.controls || this.isLoading() || this.loadError()) {
       return;
     }
 
     // 1. Synchronously render the current scene state so the WebGL framebuffer is fresh
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
+    this.updateHotspots();
     this.needsRender = false;
 
     const glCanvas = this.renderer.domElement;
@@ -713,6 +769,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     compositeCanvas.height = outH;
     const ctx = compositeCanvas.getContext('2d');
     if (!ctx) {
+      this.storageError.set('Screenshot could not be captured. Please try again.');
       return;
     }
 
@@ -793,6 +850,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       },
     });
 
+    if (!saved) {
+      this.storageError.set('Screenshot was not saved. Browser storage is unavailable or full.');
+      return;
+    }
+
     // 7. Trigger shutter flash and toast preview
     this.isCapturingFlash.set(true);
     if (this.flashTimeoutId) {
@@ -833,46 +895,63 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   private disposeModel(model: THREE.Object3D): void {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
     model.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) {
         return;
       }
 
-      mesh.geometry?.disposeBoundsTree?.();
-      mesh.geometry?.dispose();
-
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      for (const material of materials) {
-        if (!material) {
-          continue;
-        }
-        // Release every texture referenced by the material (map, normalMap, roughnessMap, ...)
-        for (const value of Object.values(material)) {
-          if (value instanceof THREE.Texture) {
-            value.dispose();
-            const image = value.image;
-            if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
-              image.close();
-            }
-          }
-        }
-        material.dispose();
+      if (mesh.geometry) geometries.add(mesh.geometry);
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        if (material) materials.add(material);
       }
     });
+    for (const geometry of geometries) {
+      geometry.disposeBoundsTree?.();
+      geometry.dispose();
+    }
+    this.disposeMaterials(materials);
+  }
+
+  private disposeMaterials(materials: Iterable<THREE.Material>): void {
+    const textures = new Set<THREE.Texture>();
+    const images = new Set<ImageBitmap>();
+    for (const material of new Set(materials)) {
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value);
+      }
+      material.dispose();
+    }
+    for (const texture of textures) {
+      texture.dispose();
+      if (typeof ImageBitmap !== 'undefined' && texture.image instanceof ImageBitmap) images.add(texture.image);
+    }
+    for (const image of images) image.close();
   }
 
   private requestRender(): void {
     this.needsRender = true;
+    this.scheduleFrame();
+  }
+
+  private scheduleFrame(): void {
+    if (this.destroyed || !this.renderer || this.frameInProgress || this.animationId !== null) return;
+    this.ngZone.runOutsideAngular(() => {
+      this.animationId = requestAnimationFrame(this.animate);
+    });
   }
 
   private handleControlsChange = (): void => {
-    this.needsRender = true;
     this.needsHotspotUpdate = true;
+    this.requestRender();
   };
 
   private animate = (): void => {
-    this.animationId = requestAnimationFrame(this.animate);
+    this.animationId = null;
+    if (this.destroyed) return;
+    this.frameInProgress = true;
 
     // Continuous smooth camera movement while a directional or zoom button is held down (>180ms).
     const activeAction = this.activeCameraAction();
@@ -887,8 +966,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.processPointerMove(event);
     }
 
-    // Must run every frame for damping / auto-rotate; emits 'change' only when the camera moves.
-    this.controls.update();
+    const controlsChanged = this.controls.update();
 
     if (this.needsRender) {
       this.needsRender = false;
@@ -898,6 +976,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     if (this.needsHotspotUpdate) {
       this.needsHotspotUpdate = false;
       this.updateHotspots();
+    }
+    this.frameInProgress = false;
+    if (controlsChanged || this.controls.autoRotate || this.activeCameraAction() ||
+        this.pendingPointerMove || this.needsRender || this.needsHotspotUpdate) {
+      this.scheduleFrame();
     }
   };
 
@@ -955,6 +1038,10 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       const old = previous[next.length];
       if (!old || old.data !== hotspot || old.visible !== visible) {
         changed = true;
+      }
+      if (old) {
+        old.x = x;
+        old.y = y;
       }
 
       next.push({ data: hotspot, x, y, visible });
@@ -1053,6 +1140,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     this.renderer.render(this.scene, this.camera);
     this.needsRender = false;
     this.needsHotspotUpdate = true;
+    this.requestRender();
   };
 
   private updateMouse(event: PointerEvent): void {
@@ -1083,6 +1171,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   private handlePointerMove = (event: PointerEvent): void => {
     if (this.placementMode() || this.isDentalModel()) {
       this.pendingPointerMove = event;
+      this.scheduleFrame();
     }
   };
 
@@ -1177,6 +1266,8 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   };
 
   private handlePointerLeave = (): void => {
+    this.pendingPointerMove = null;
+    this.setCursor('default');
     if (this.hoveredTooth()) {
       this.ngZone.run(() => this.hoveredTooth.set(null));
     }
@@ -1189,6 +1280,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   selectTooth(tooth: ToothData, clickedPoint?: { x: number; y: number; z: number }): void {
+    if (!this.dentalService.getTooth(tooth.number)) return;
     this.ngZone.run(() => {
       if (this.toothBoundsMap.size === 0) {
         this.computeAllToothBounds();
@@ -1239,14 +1331,15 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       state.divisionMode = mode;
       toothMap.set(tooth.number, { ...state });
       this.toothColors.set(toothMap);
-      this.dentalService.saveToothStates(toothMap);
+      this.persistToothStates(toothMap);
     }
     this.updateMeshVertexColors();
   }
 
   toggleGridLines(): void {
     this.showGridLines.update(v => !v);
-    this.dentalService.saveGridLinesPreference(this.showGridLines());
+    this.storageError.set(this.dentalService.saveGridLinesPreference(this.showGridLines())
+      ? null : 'Grid preference could not be saved. Browser storage is unavailable or full.');
     this.updateMeshVertexColors();
   }
 
@@ -1280,6 +1373,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   }
 
   applyColor(colorHex: string): void {
+    if (!isHexColor(colorHex)) return;
     const tooth = this.selectedTooth();
     if (!tooth) return;
 
@@ -1321,7 +1415,7 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
 
     toothMap.set(tooth.number, state);
     this.toothColors.set(toothMap);
-    this.dentalService.saveToothStates(toothMap);
+    this.persistToothStates(toothMap);
     this.updateMeshVertexColors();
   }
 
@@ -1340,6 +1434,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     return state.zones[partId] || '#FAF9F5';
   }
 
+  private persistToothStates(states: Map<number, ToothState>): void {
+    this.storageError.set(this.dentalService.saveToothStates(states)
+      ? null : 'Dental changes are visible but could not be saved. Browser storage is unavailable or full.');
+  }
+
   resetCurrentTooth(): void {
     const tooth = this.selectedTooth();
     if (!tooth) return;
@@ -1347,14 +1446,14 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     const toothMap = new Map(this.toothColors());
     toothMap.delete(tooth.number);
     this.toothColors.set(toothMap);
-    this.dentalService.saveToothStates(toothMap);
+    this.persistToothStates(toothMap);
     this.updateMeshVertexColors();
   }
 
   resetAllTeeth(): void {
     const emptyMap = new Map<number, ToothState>();
     this.toothColors.set(emptyMap);
-    this.dentalService.saveToothStates(emptyMap);
+    this.persistToothStates(emptyMap);
     this.updateMeshVertexColors();
   }
 
@@ -1499,6 +1598,11 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       }
 
       const nextGeo = new THREE.BufferGeometry();
+      nextGeo.name = current.name;
+      nextGeo.userData = { ...current.userData };
+      for (const group of current.groups) {
+        nextGeo.addGroup(group.start * 4, group.count * 4, group.materialIndex);
+      }
       nextGeo.setAttribute('position', new THREE.BufferAttribute(dstPos, 3));
       if (dstNorm) {
         nextGeo.setAttribute('normal', new THREE.BufferAttribute(dstNorm, 3));
@@ -1865,27 +1969,34 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
   confirmPlacement(): void {
     const data = this.pendingHotspot();
     const organ = this.loadedOrgan;
-    if (!data || !organ || !this.pendingName.trim()) return;
+    if (!data || !organ || !this.pendingName.trim() ||
+        (this.pendingValue !== undefined && this.pendingValue !== null && !Number.isFinite(this.pendingValue))) return;
 
     const newHotspot: Hotspot = {
-      id: `custom-${Date.now()}`,
+      id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: this.pendingName.trim(),
       description: this.pendingDescription.trim(),
-      value: this.pendingValue,
+      value: this.pendingValue ?? undefined,
       position: { x: data.position.x, y: data.position.y, z: data.position.z },
       normal: { x: data.normal.x, y: data.normal.y, z: data.normal.z },
       isCustom: true
     };
 
     // Update active model array
-    (organ.hotspots ??= []).push(newHotspot);
+    const updated = [...(organ.hotspots ?? []), newHotspot];
 
     // Persist
-    this.hotspotStorage.saveCustomHotspots(organ.id, organ.hotspots);
+    if (!this.hotspotStorage.saveCustomHotspots(organ.id, updated)) {
+      this.storageError.set('Point was not saved. Browser storage is unavailable or full.');
+      return;
+    }
+    organ.hotspots = updated;
+    this.storageError.set(null);
 
     // Register the new point directly; no need to reload the whole model
     this.registerHotspot(newHotspot);
     this.needsHotspotUpdate = true;
+    this.requestRender();
 
     this.togglePlacementMode(); // Exit mode
   }
@@ -1895,20 +2006,29 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
     if (!organ?.hotspots) return;
 
     // Remove from array
-    organ.hotspots = organ.hotspots.filter(h => h.id !== id);
+    const updated = organ.hotspots.filter(h => h.id !== id);
 
     // Save to storage
-    this.hotspotStorage.saveCustomHotspots(organ.id, organ.hotspots);
+    if (!this.hotspotStorage.saveCustomHotspots(organ.id, updated)) {
+      this.storageError.set('Point was not deleted. Browser storage is unavailable.');
+      return;
+    }
+    organ.hotspots = updated;
+    this.storageError.set(null);
 
     // Drop cached state for the point; no need to reload the whole model
     this.removeHotspotState(id);
     this.needsHotspotUpdate = true;
+    this.requestRender();
 
     this.clearHotspot();
   }
 
   ngOnDestroy(): void {
-    cancelAnimationFrame(this.animationId);
+    this.destroyed = true;
+    if (this.animationId !== null) cancelAnimationFrame(this.animationId);
+    this.animationId = null;
+    this.pendingPointerMove = null;
 
     if (this.toastTimeoutId) {
       clearTimeout(this.toastTimeoutId);
@@ -1945,6 +2065,27 @@ export class OrganViewerComponent implements AfterViewInit, OnDestroy {
       this.renderer.forceContextLoss();
       canvas?.remove();
     }
+  }
+
+  retryLoad(): void {
+    if (this.destroyed) return;
+    if (this.scene && this.renderer && this.controls) {
+      this.ngZone.runOutsideAngular(() => this.loadModel(this.organ()));
+    } else {
+      this.ngAfterViewInit();
+    }
+  }
+
+  saveHotspotValue(hotspot: Hotspot): void {
+    if (hotspot.value === null) hotspot.value = undefined;
+    if (hotspot.value !== undefined && !Number.isFinite(hotspot.value)) return;
+    if (hotspot.isCustom && this.loadedOrgan &&
+        !this.hotspotStorage.saveCustomHotspots(this.loadedOrgan.id, this.loadedOrgan.hotspots ?? [])) {
+      this.storageError.set('Point data was not saved. Browser storage is unavailable or full.');
+      return;
+    }
+    this.storageError.set(null);
+    this.clearHotspot();
   }
 
   private checkIsGum(hit: THREE.Intersection): boolean {

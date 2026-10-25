@@ -24,12 +24,18 @@ import { Organ } from '../../../core/models/organ.model';
 })
 export class AnatomyPageComponent {
   private readonly anatomyService = inject(AnatomyService);
+  readonly organs = this.anatomyService.getOrgans();
 
   readonly selectedOrgan = signal<Organ>(
-    this.anatomyService.getOrgans()[0]
+    this.organs[0]
   );
 
   selectOrgan(organ: Organ): void {
     this.selectedOrgan.set(organ);
+  }
+
+  selectOrganById(id: string): void {
+    const organ = this.organs.find(item => item.id === id);
+    if (organ) this.selectOrgan(organ);
   }
 }
