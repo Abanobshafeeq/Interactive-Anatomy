@@ -6,11 +6,48 @@ import { DentalService } from '../../../core/services/dental.service';
 import { OrganScreenshotService } from '../../../core/services/organ-screenshot.service';
 import { HotspotStorageService } from '../../../core/services/hotspot-storage.service';
 import * as THREE from 'three';
+import { subdivideGeometry } from './dental/dental-geometry';
+import { disposeModel } from './scene/resource-disposer';
+import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { Organ } from '../../../core/models/organ.model';
+
+interface ViewerTestBoundary {
+  loadedOrgan?: Organ;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  cameraHoldStartTime: number;
+  renderer: {
+    domElement: HTMLCanvasElement;
+    render: jasmine.Spy;
+    dispose: jasmine.Spy;
+    forceContextLoss: jasmine.Spy;
+    setSize: jasmine.Spy;
+  };
+  controls: {
+    update: jasmine.Spy<() => boolean>;
+    target: THREE.Vector3;
+    autoRotate: boolean;
+    minDistance: number;
+    maxDistance: number;
+    removeEventListener: jasmine.Spy;
+    dispose: jasmine.Spy;
+  };
+  resizeObserver: { disconnect: jasmine.Spy };
+  animate: FrameRequestCallback;
+  requestRender(): void;
+  handleControlsChange(): void;
+  handlePointerMove(event: PointerEvent): void;
+  handlePointerLeave(): void;
+  processPointerMove(event: PointerEvent): void;
+  loadModel(organ: Organ): void;
+  initScene(): void;
+}
 
 describe('OrganViewerComponent', () => {
   let component: OrganViewerComponent;
   let fixture: ComponentFixture<OrganViewerComponent>;
-  let viewer: any;
+  let viewer: ViewerTestBoundary;
+  let trackedFrame: FrameRequestCallback | undefined;
   let frames: Map<number, FrameRequestCallback>;
   let nextFrame: number;
   const flushFrame = () => {
@@ -21,7 +58,7 @@ describe('OrganViewerComponent', () => {
   };
 
   beforeEach(async () => {
-    viewer = undefined;
+    trackedFrame = undefined;
     spyOn(OrganViewerComponent.prototype, 'ngAfterViewInit').and.stub();
     spyOn(Storage.prototype, 'getItem').and.returnValue(null);
     frames = new Map();
@@ -29,7 +66,7 @@ describe('OrganViewerComponent', () => {
     const nativeRequest = window.requestAnimationFrame.bind(window);
     const nativeCancel = window.cancelAnimationFrame.bind(window);
     spyOn(window, 'requestAnimationFrame').and.callFake(callback => {
-      if (!viewer || callback !== viewer.animate) return nativeRequest(callback);
+      if (callback !== trackedFrame) return nativeRequest(callback);
       frames.set(++nextFrame, callback);
       return nextFrame;
     });
@@ -46,7 +83,8 @@ describe('OrganViewerComponent', () => {
     component = fixture.componentInstance;
     fixture.componentRef.setInput('organ', TestBed.inject(AnatomyService).getOrgans()[0]);
     fixture.detectChanges();
-    viewer = component;
+    viewer = component as unknown as ViewerTestBoundary;
+    trackedFrame = viewer.animate;
     viewer.loadedOrgan = component.organ();
     viewer.scene = new THREE.Scene();
     viewer.camera = new THREE.PerspectiveCamera(45, 1, .1, 1000);
@@ -208,7 +246,7 @@ describe('OrganViewerComponent', () => {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute([0,0, 1,0, 1,1, 0,0, 1,1, 0,1], 2));
     geometry.addGroup(0, 6, 1);
     geometry.userData = { asset: 'dental' };
-    const result = viewer.subdivideGeometry(geometry, 1) as THREE.BufferGeometry;
+    const result = subdivideGeometry(geometry, 1);
     expect(result.attributes['position'].count).toBe(24);
     expect(result.attributes['normal'].count).toBe(24);
     expect(result.attributes['uv'].count).toBe(24);
@@ -242,21 +280,23 @@ describe('OrganViewerComponent', () => {
     const disposeGeometry = spyOn(geometry, 'dispose');
     const disposeMaterial = spyOn(material, 'dispose');
     const disposeTexture = spyOn(texture, 'dispose');
-    viewer.disposeModel(root);
+    disposeModel(root);
     expect(disposeGeometry).toHaveBeenCalledTimes(1);
     expect(disposeMaterial).toHaveBeenCalledTimes(1);
     expect(disposeTexture).toHaveBeenCalledTimes(1);
   });
 
   it('disposes late model loads after destruction and never restarts rendering', () => {
-    let finish: any;
-    spyOn(viewer.gltfLoader, 'load').and.callFake((_path: string, callback: any) => { finish = callback; });
+    let finish: Parameters<GLTFLoader['load']>[1] | undefined;
+    spyOn(GLTFLoader.prototype, 'load').and.callFake((_path, callback) => { finish = callback; });
     viewer.loadModel(component.organ());
     fixture.destroy();
     const geometry = new THREE.BoxGeometry();
     const material = new THREE.MeshBasicMaterial();
     const dispose = spyOn(geometry, 'dispose');
-    finish({ scene: new THREE.Mesh(geometry, material) });
+    if (!finish) throw new Error('Model load was not started');
+    const scene = new THREE.Group().add(new THREE.Mesh(geometry, material));
+    finish(jasmine.createSpyObj<GLTF>('gltf', [], { scene }));
     expect(dispose).toHaveBeenCalled();
     viewer.requestRender();
     expect(frames.size).toBe(0);
@@ -276,10 +316,11 @@ describe('OrganViewerComponent', () => {
   });
 
   it('shows a retryable error when loading fails', () => {
-    let fail: any;
-    const load = spyOn(viewer.gltfLoader, 'load').and.callFake((_path: string, _load: any, _progress: any, error: any) => { fail = error; });
+    let fail: ((error: unknown) => void) | undefined;
+    const load = spyOn(GLTFLoader.prototype, 'load').and.callFake((_path, _load, _progress, error) => { fail = error; });
     spyOn(console, 'error');
     viewer.loadModel(component.organ());
+    if (!fail) throw new Error('Model error callback was not supplied');
     fail(new Error('Network unavailable'));
     expect(component.isLoading()).toBeFalse();
     expect(component.loadError()).toContain('Unable to load Brain');
