@@ -6,6 +6,7 @@ import {
   output,
   signal
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { AnatomyService } from '../../../core/services/anatomy.service';
 import { Organ } from '../../../core/models/organ.model';
@@ -13,7 +14,7 @@ import { Organ } from '../../../core/models/organ.model';
 @Component({
   selector: 'app-organ-list',
   standalone: true,
-  imports: [],
+  imports: [RouterLink],
   templateUrl: './organ-list.component.html',
   styleUrl: './organ-list.component.css'
 })

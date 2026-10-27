@@ -3,6 +3,7 @@ import {
   inject,
   signal
 } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { OrganListComponent } from '../organ-list/organ-list.component';
 import { OrganViewerComponent } from '../organ-viewer/organ-viewer.component';
@@ -15,6 +16,7 @@ import { Organ } from '../../../core/models/organ.model';
   selector: 'app-anatomy-page',
   standalone: true,
   imports: [
+    RouterLink,
     OrganListComponent,
     OrganViewerComponent,
     OrganInfoComponent

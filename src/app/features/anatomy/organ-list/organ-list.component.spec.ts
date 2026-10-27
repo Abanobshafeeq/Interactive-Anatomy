@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 
 import { OrganListComponent } from './organ-list.component';
 
@@ -8,7 +9,7 @@ describe('OrganListComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [OrganListComponent]
+      imports: [OrganListComponent], providers: [provideRouter([])]
     })
     .compileComponents();
 

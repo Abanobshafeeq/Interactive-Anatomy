@@ -44,8 +44,6 @@ export class ModelLoader {
       this.tdsLoader.load(path, object => onLoad(object), undefined, onError);
     } else if (lowerPath.endsWith('.obj')) {
       this.loadObj(path, requestId, onLoad, onError, callbacks.texturesReady);
-    } else if (lowerPath.endsWith('.mtl')) {
-      new MTLLoader().load(path, () => onLoad(new THREE.Group()), undefined, onError);
     } else {
       callbacks.unsupported();
     }

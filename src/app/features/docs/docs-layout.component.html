@@ -1,0 +1,29 @@
+<a class="skip-link" href="#docs-main">Skip to documentation</a>
+<header class="topbar" [attr.inert]="mobile() && drawerOpen() ? '' : null">
+  <a class="brand" routerLink="/docs"><span class="brand-symbol" aria-hidden="true">a<span>·</span></span><span>Anatomy<span class="brand-sub"> / developer docs</span></span></a>
+  <div class="top-actions">
+    <span class="version" title="Repository baseline at generation; source snapshots include content hashes">Angular 18 <span>·</span> {{ version }}</span>
+    <a class="viewer-link" routerLink="/anatomy">Open viewer <span aria-hidden="true">↗</span></a>
+    <button class="icon-button" type="button" (click)="toggleTheme()" [attr.aria-label]="dark() ? 'Use light theme' : 'Use dark theme'">{{ dark() ? '☀' : '◐' }}</button>
+    <button class="icon-button mobile-only" type="button" (click)="openDrawer()" aria-controls="docs-sidebar" [attr.aria-expanded]="drawerOpen()" aria-label="Open documentation navigation">☰</button>
+  </div>
+</header>
+@if (mobile() && drawerOpen()) {<button type="button" class="drawer-backdrop" tabindex="-1" (click)="closeDrawer()" aria-label="Close navigation"></button>}
+<aside #sidebar id="docs-sidebar" class="sidebar" [class.drawer-open]="drawerOpen()" [attr.inert]="mobile() && !drawerOpen() ? '' : null"
+  [attr.role]="mobile() && drawerOpen() ? 'dialog' : null" [attr.aria-modal]="mobile() && drawerOpen() ? 'true' : null" aria-label="Documentation navigation">
+  <button type="button" class="drawer-close mobile-only" (click)="closeDrawer()">Close navigation ×</button>
+  <div class="sidebar-label">THE ENGINEERING HANDBOOK</div>
+  <app-docs-search />
+  <nav aria-label="Documentation sections">
+    <a class="nav-home" routerLink="/docs" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}" ariaCurrentWhenActive="page">Overview</a>
+    @for (group of groups; track group.category; let index = $index) {
+      <details open><summary><span class="group-number">0{{ index + 1 }}</span>{{ group.category }}</summary>
+        @for (page of group.pages; track page.id) {
+          <a [routerLink]="docUrl(page.id)" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}" ariaCurrentWhenActive="page" [class.nested]="page.id.includes('/')">{{ page.title }}</a>
+        }
+      </details>
+    }
+  </nav>
+  <div class="sidebar-footer"><span class="status-dot"></span> Source-based documentation<br><small>Curated guides · generated declarations</small></div>
+</aside>
+<main id="docs-main" tabindex="-1" [attr.inert]="mobile() && drawerOpen() ? '' : null"><router-outlet /></main>

@@ -1,0 +1,39 @@
+@for (current of [page()]; track current?.id) {
+  @if (current) {
+    <div class="page-grid" [class.home]="current.id === ''">
+      <article>
+        <nav class="breadcrumbs" aria-label="Breadcrumb"><a routerLink="/docs">Docs</a><span aria-hidden="true">/</span><span>{{ current.category }}</span></nav>
+        <div class="eyebrow"><span></span> {{ current.id === '' ? 'BUILT TO BE UNDERSTOOD' : current.category.toUpperCase() }}</div>
+        <h1 tabindex="-1">{{ current.title }}</h1>
+        <p class="introduction">{{ current.description }}</p>
+        @if (current.id === '') {
+          <div class="home-facts"><span><b>07</b> catalog models</span><span><b>28</b> physical teeth</span><span><b>10</b> viewer modules</span></div>
+        }
+        <div class="page-rule"></div>
+        <div class="mobile-toc"><app-docs-toc [sections]="current.sections" /></div>
+        @for (section of current.sections; track section.id) {
+          <section [attr.aria-labelledby]="section.id">
+            <h2 [id]="section.id"><a [routerLink]="[]" [fragment]="section.id" [attr.aria-label]="'Link to ' + section.title">{{ section.title }}<span aria-hidden="true">#</span></a></h2>
+            @for (block of section.blocks; track $index) {<app-docs-block [block]="block" />}
+          </section>
+        }
+        @if (sourceLinks().length) {
+          <details class="source-links"><summary>Browse the implementation <span>{{ sourceLinks().length }} files</span></summary>
+            @for (source of sourceLinks(); track source.path) {<a [routerLink]="'/docs/source/' + source.id">{{ source.path }} <span aria-hidden="true">↗</span></a>}
+          </details>
+        }
+        <nav class="previous-next" aria-label="Previous and next page">
+          @if (neighbors().previous; as previous) {<a [routerLink]="docUrl(previous.id)"><small>← Previous</small><strong>{{ previous.title }}</strong></a>} @else {<span></span>}
+          @if (neighbors().next; as next) {<a [routerLink]="docUrl(next.id)"><small>Next →</small><strong>{{ next.title }}</strong></a>}
+        </nav>
+        <footer>ANATOMY ANGULAR <span>Engineering documentation · Source is the contract</span></footer>
+      </article>
+      <aside class="right-column"><app-docs-toc [sections]="current.sections" />
+        @if (relatedPages().length) {<div class="related"><p>IN THIS CHAPTER</p>@for (related of relatedPages(); track related.id) {<a [routerLink]="docUrl(related.id)">{{ related.title }} ↗</a>}</div>}
+        <a class="source-shortcut" routerLink="/docs/maintenance">Keep these docs current →</a>
+      </aside>
+    </div>
+  } @else {
+    <article class="not-found"><div class="eyebrow">404 · DOCUMENTATION</div><h1 tabindex="-1">Page not found</h1><p>The page “{{ pageId() }}” isn’t in this documentation index. Use search or return to the overview.</p><a routerLink="/docs">Documentation overview →</a><a routerLink="/docs/api-reference">Browse the API reference →</a></article>
+  }
+}

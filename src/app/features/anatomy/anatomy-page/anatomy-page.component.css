@@ -143,3 +143,13 @@
     display: none;
   }
 }
+.mobile-docs-link {
+  color: var(--lavender);
+  text-decoration: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mobile-docs-link:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 3px;
+}

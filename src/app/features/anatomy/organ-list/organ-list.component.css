@@ -159,3 +159,14 @@
 .organ-item:hover .organ-arrow {
   color: var(--coral);
 }
+.developer-docs-link {
+  display: inline-block;
+  color: var(--lavender);
+  font-size: 11px;
+  line-height: 2;
+  text-decoration: none;
+}
+.developer-docs-link:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 3px;
+}

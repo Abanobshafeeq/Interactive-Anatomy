@@ -166,7 +166,7 @@ export class AnatomyService {
         id: 'skull-obj',
         name: 'Skull',
         description: 'Protects the brain and forms the shape of the face.',
-        position: { x: 0, y: 20, z: 2 },
+        position: { x: 0, y: 0, z: 2 },
         normal: { x: 0, y: 0.2, z: 0.98 }
       },
       {

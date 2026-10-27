@@ -2,6 +2,25 @@
 
 This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 18.2.21.
 
+## Developer documentation
+
+Run `npm start`, then open `/docs` for the developer portal or `/anatomy` for the viewer.
+The portal includes architecture, dental algorithms, generated API declarations, source browsing,
+search, and seven type-checked integration scenarios. Both features are lazy-loaded independently.
+
+See [documentation maintenance](docs/DEVELOPER_DOCUMENTATION.md) for editing and validation,
+and [implementation and verification results](docs/PORTAL_REPORT.md) for this change.
+
+```sh
+node scripts/generate-docs-api.mjs
+node scripts/check-docs.mjs
+npx tsc --noEmit -p docs/tsconfig.examples.json
+```
+
+With the development server running, `node scripts/browser-smoke.mjs` checks the viewer and
+`node scripts/docs-browser-smoke.mjs` checks the documentation. Both accept `CHROME_BIN` and
+`ANATOMY_URL`; the existing viewer script requires Angular development/debug APIs.
+
 ## Development server
 
 Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.

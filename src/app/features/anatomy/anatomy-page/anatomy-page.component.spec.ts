@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 
 import { AnatomyPageComponent } from './anatomy-page.component';
 import { OrganViewerComponent } from '../organ-viewer/organ-viewer.component';
@@ -12,7 +13,7 @@ describe('AnatomyPageComponent', () => {
   beforeEach(async () => {
     spyOn(OrganViewerComponent.prototype, 'ngAfterViewInit').and.stub();
     await TestBed.configureTestingModule({
-      imports: [AnatomyPageComponent]
+      imports: [AnatomyPageComponent], providers: [provideRouter([])]
     })
     .compileComponents();
 
