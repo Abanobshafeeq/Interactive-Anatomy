@@ -11,6 +11,12 @@ search, and seven type-checked integration scenarios. Both features are lazy-loa
 See [documentation maintenance](docs/DEVELOPER_DOCUMENTATION.md) for editing and validation,
 and [implementation and verification results](docs/PORTAL_REPORT.md) for this change.
 
+For Blender inspection, geometry extraction, coordinate conversion, and numbered annotations,
+see [Extracting 3D Model Data Using Blender](docs/DEVELOPER_DOCUMENTATION.md#extracting-3d-model-data-using-blender).
+The complete tutorial is also available in the portal at `/docs/blender-data-extraction`, under
+**Three.js engine > Blender & 3D Data Extraction**. After editing its canonical Markdown,
+run `node scripts/generate-docs-api.mjs` to update the website content.
+
 ```sh
 node scripts/generate-docs-api.mjs
 node scripts/check-docs.mjs

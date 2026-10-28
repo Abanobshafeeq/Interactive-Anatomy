@@ -8,6 +8,7 @@ import { API_SYMBOLS } from './content/api.generated';
 import { DocsLayoutComponent } from './docs-layout.component';
 import { DocsSearchComponent } from './ui/docs-search.component';
 import { DocsCodeBlockComponent } from './ui/docs-code-block.component';
+import { DocsInlineComponent } from './ui/docs-inline.component';
 
 describe('Documentation portal', () => {
   let harness: RouterTestingHarness;
@@ -39,6 +40,29 @@ describe('Documentation portal', () => {
     expect(active?.textContent).toContain('Dental algorithms');
     expect(content()).toContain('computeToothBounds');
     expect(harness.routeNativeElement?.querySelector('h2#bounds')).toBeTruthy();
+  });
+
+  it('renders the canonical Blender tutorial in the engine navigation with structured content', async () => {
+    await harness.navigateByUrl('/docs/blender-data-extraction');
+    const root = harness.routeNativeElement!;
+    expect(root.querySelector('h1')?.textContent).toBe('Blender & 3D Data Extraction');
+    const active = root.querySelector('nav[aria-label="Documentation sections"] a[aria-current="page"]');
+    expect(active?.getAttribute('href')).toBe('/docs/blender-data-extraction');
+    expect(active?.closest('details')?.querySelector('summary')?.textContent).toContain('Three.js engine');
+    expect(root.querySelector('h2#object-transform-values')).toBeTruthy();
+    expect(root.querySelector('h3#position-location')).toBeTruthy();
+    expect(root.querySelector('h3#final-validation-checklist')).toBeTruthy();
+    expect(root.querySelectorAll('article table').length).toBeGreaterThan(5);
+    expect(root.querySelector('article table')?.textContent).toContain('EXT_meshopt_compression');
+    const examples = Array.from(root.querySelectorAll('article app-docs-code-block'));
+    expect(examples.filter(node => node.querySelector('.code-head')?.textContent?.includes('python')).length).toBe(4);
+    expect(examples.some(node => node.textContent?.includes('interface AnatomyAnnotation'))).toBeTrue();
+    expect(root.querySelectorAll('article .check-state').length).toBeGreaterThan(10);
+    expect(root.querySelector('article .diagram')?.textContent).toContain('No →');
+    expect(root.querySelector('article p a[href*="/docs/source/"]')).toBeTruthy();
+    expect(root.querySelector('article p a[href="https://github.com/thebuggeddev/anatomy"]')).toBeTruthy();
+    expect(content()).toContain('Not yet extracted');
+    expect(root.querySelector('canvas')).toBeNull();
   });
 
   it('renders every required conceptual page through routing', async () => {
@@ -175,6 +199,9 @@ describe('Documentation portal', () => {
     expect(searchPages('isNearBoundary').some(page => page.id === 'api-reference/dental-service')).toBeTrue();
     expect(searchPages('zzzz-no-matching-guide')).toEqual([]);
     expect(searchPages('  ')).not.toEqual([]);
+    for (const term of ['Blender', 'Vertex', 'Normal', 'Annotation', 'corner_normals']) {
+      expect(searchPages(term).some(page => page.id === 'blender-data-extraction')).withContext(term).toBeTrue();
+    }
   });
 
   it('renders code and HTML as escaped text', () => {
@@ -183,6 +210,21 @@ describe('Documentation portal', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('img')).toBeNull();
     expect(fixture.nativeElement.textContent).toContain('<img src=x');
+  });
+
+  it('preserves inline punctuation, escapes prose and resolves internal source links', () => {
+    const fixture = TestBed.createComponent(DocsInlineComponent);
+    fixture.componentRef.setInput('text', [
+      { kind: 'text', text: 'Read ' },
+      { kind: 'code', text: '<surface>' },
+      { kind: 'text', text: ', then ' },
+      { kind: 'link', text: 'source', href: '/docs/source/app--core--services--anatomy.service', external: false },
+      { kind: 'text', text: '.' },
+    ]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toBe('Read <surface>, then source.');
+    expect(fixture.nativeElement.querySelector('surface')).toBeNull();
+    expect(fixture.nativeElement.querySelector('a')?.getAttribute('href')).toBe('/docs/source/app--core--services--anatomy.service');
   });
 
   it('copies the original code and reports unavailable clipboard honestly', async () => {

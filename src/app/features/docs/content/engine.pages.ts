@@ -1,5 +1,6 @@
 import type { DocPage } from '../docs.models';
 import { api, code, diagram, links, note, page, section, table, text } from './foundation.pages';
+import { BLENDER_PAGE } from './blender.generated';
 
 const viewer = 'src/app/features/anatomy/organ-viewer/';
 export const ENGINE_PAGES: DocPage[] = [
@@ -107,6 +108,7 @@ controls.dispose();
 renderer.dispose();
 renderer.forceContextLoss();`), links(['Reuse ModelLoader', 'integration'], ['Source/API', 'api-reference/model-loader'], ['Memory guide', 'performance'])),
   ),
+  BLENDER_PAGE,
   page('geometry', 'Geometry and subdivision', 'Three.js engine', 'Buffer layouts, paired dental quads, interpolation, bounds, material groups and disposal rules.',
     [viewer + 'dental/dental-geometry.ts', viewer + 'scene/model-preparation.ts'],
     section('layout', 'The input is paired dental quads',

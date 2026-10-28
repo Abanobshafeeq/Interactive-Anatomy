@@ -13,9 +13,11 @@ require.extensions['.ts'] = (module, filename) => {
   module._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
 const { DOC_PAGES, DOC_CATEGORIES, searchableText, searchPages } = require('../src/app/features/docs/docs-content.ts');
+const { plainText } = require('../src/app/features/docs/docs.models.ts');
+const { SOURCE_SNAPSHOTS } = require('../src/app/features/docs/content/sources.generated.ts');
 const { API_SYMBOLS } = require('../src/app/features/docs/content/api.generated.ts');
 const { API_BEHAVIOR, METHOD_NOTES } = require('../src/app/features/docs/content/api.behavior.ts');
-const required = ['','getting-started','architecture','project-structure','angular-foundation','data-models','services','organ-viewer','threejs-engine','model-loading','geometry','dental-system','dental-algorithms','hotspots','raycasting','camera-controls','screenshots','persistence','performance','testing','api-reference','integration','troubleshooting','glossary'];
+const required = ['','getting-started','architecture','project-structure','angular-foundation','data-models','services','organ-viewer','threejs-engine','model-loading','blender-data-extraction','geometry','dental-system','dental-algorithms','hotspots','raycasting','camera-controls','screenshots','persistence','performance','testing','api-reference','integration','troubleshooting','glossary'];
 const pages = new Map(DOC_PAGES.map(page => [page.id, page]));
 assert.equal(pages.size, DOC_PAGES.length, 'Duplicate documentation route IDs');
 for (const id of required) assert(pages.has(id), `Missing required page: ${id}`);
@@ -26,20 +28,34 @@ let diagrams = 0;
 for (const page of DOC_PAGES) {
   assert(page.title.trim() && page.description.trim() && DOC_CATEGORIES.includes(page.category), `Missing metadata: ${page.id}`);
   assert(page.sections.length, `No sections: ${page.id}`);
-  const ids = new Set(page.sections.map(section => section.id));
-  assert.equal(ids.size, page.sections.length, `Duplicate headings: ${page.id}`);
+  const headings = page.sections.flatMap(section => [section.id, ...section.blocks.filter(block => block.kind === 'heading').map(block => block.id)]);
+  const ids = new Set(headings);
+  assert.equal(ids.size, headings.length, `Duplicate headings: ${page.id}`);
   assert(searchableText(page).includes(page.title.toLowerCase()), `Missing search index: ${page.id}`);
   for (const source of page.sources) assert(fs.existsSync(path.join(root, source)), `Unresolved source ${source}`);
   for (const section of page.sections) {
     assert(section.id && section.title && section.blocks.length, `Empty section: ${page.id}`);
     for (const block of section.blocks) {
+      const richText = block.kind === 'text' ? [block.text] : block.kind === 'table' ? block.columns.concat(block.rows.flat())
+        : block.kind === 'list' ? block.items.map(item => item.text) : [];
+      for (const value of richText) if (Array.isArray(value)) for (const inline of value) {
+        if (inline.kind !== 'link' || inline.external) continue;
+        if (inline.href.startsWith('/docs/source/')) {
+          assert(SOURCE_SNAPSHOTS.some(source => '/docs/source/' + source.id === inline.href), `Missing source link: ${inline.href}`);
+        } else {
+          const target = pages.get(inline.href.replace(/^\/docs\/?/, ''));
+          assert(target, `Missing inline page link: ${inline.href}`);
+          if (inline.fragment) assert(target.sections.some(section => section.id === inline.fragment || section.blocks.some(block => block.kind === 'heading' && block.id === inline.fragment)), `Missing inline fragment: ${inline.fragment}`);
+        }
+        links++;
+      }
       if (block.kind === 'api') assert(names.has(block.symbol), `Missing API symbol ${block.symbol}`);
       if (block.kind === 'diagram') { assert(block.nodes.length && block.description, `Empty diagram in ${page.id}`); diagrams++; }
       if (block.kind === 'links') for (const link of block.links) {
         const [id, fragment] = link.page.split('#');
         const target = pages.get(id);
         assert(target, `Broken docs link ${page.id} → ${link.page}`);
-        if (fragment) assert(target.sections.some(section => section.id === fragment), `Broken fragment: ${link.page}`);
+        if (fragment) assert(target.sections.some(section => section.id === fragment || section.blocks.some(block => block.kind === 'heading' && block.id === fragment)), `Broken fragment: ${link.page}`);
         links++;
       }
     }
@@ -58,5 +74,16 @@ for (const symbol of API_SYMBOLS) {
 assert(searchPages('zzzz-no-matching-guide').length === 0, 'Empty search result broken');
 assert(searchPages('Meshopt').some(page => page.id === 'model-loading'), 'Content search missing');
 assert(searchPages('ModelLoader').some(page => page.id === 'api-reference/model-loader'), 'API search missing');
+const blender = pages.get('blender-data-extraction');
+assert.equal(blender.category, 'Three.js engine');
+for (const term of ['Blender', 'Vertex', 'Normal', 'Annotation', 'corner_normals', 'Not yet extracted']) {
+  assert(searchPages(term).some(page => page.id === blender.id), `Blender search missing: ${term}`);
+}
+const tutorial = fs.readFileSync(path.join(root, 'docs/DEVELOPER_DOCUMENTATION.md'), 'utf8').replaceAll('\r\n', '\n').split('# Extracting 3D Model Data Using Blender\n')[1];
+const blocks = blender.sections.flatMap(section => section.blocks);
+const canonicalCode = [...tutorial.matchAll(/```(\w+)\n([\s\S]*?)```/g)].filter(match => match[1] !== 'mermaid').map(match => match[2].replace(/\n$/, ''));
+assert.deepEqual(blocks.filter(block => block.kind === 'code').map(block => block.code), canonicalCode, 'Blender examples differ from canonical Markdown');
+assert.equal(blocks.filter(block => block.kind === 'list').flatMap(block => block.items).filter(item => item.checked !== undefined).length, [...tutorial.matchAll(/^- \[ \]/gm)].length, 'Blender checklist incomplete');
+assert(blocks.some(block => block.kind === 'table' && block.rows.some(row => row.some(cell => plainText(cell) === 'Not yet extracted'))), 'Unverified measurements missing from Blender table');
 execFileSync(process.execPath, [path.join(root, 'scripts/generate-docs-api.mjs'), '--check'], { cwd: root, stdio: 'inherit' });
 console.log(JSON.stringify({ pages: pages.size, requiredTopics: required.length, exportedSymbols: names.size, checkedLinks: links, diagrams, categories: DOC_CATEGORIES.length }, null, 2));

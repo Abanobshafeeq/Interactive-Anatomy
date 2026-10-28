@@ -49,7 +49,7 @@ try {
     return result.result.value;
   };
   const check = async (name, expression) => {
-    assert(await evaluate(expression), name); results.push({ name, status: 'PASS' }); console.log(`PASS ${name}`);
+    await until(() => evaluate(expression), name); results.push({ name, status: 'PASS' }); console.log(`PASS ${name}`);
   };
   const key = async (name, modifiers = 0) => {
     const params = { key: name, code: name === 'k' ? 'KeyK' : name, modifiers };
@@ -81,6 +81,26 @@ try {
   await check('fresh documentation route has no WebGL calls, canvas or live anatomy', 'docsWebGLCalls===0 && !document.querySelector("canvas, app-organ-viewer, app-anatomy-page")');
   await check('desktop layout has no horizontal overflow and includes all three columns', 'document.documentElement.scrollWidth<=innerWidth && document.querySelector(".sidebar").getBoundingClientRect().width>0 && getComputedStyle(document.querySelector(".right-column")).display!=="none"');
   await screenshot('docs-home-desktop');
+  await evaluate(`document.querySelector('nav[aria-label="Documentation sections"] a[href="/docs/blender-data-extraction"]').click();true`);
+  await waitHeading('Blender & 3D Data Extraction');
+  await check('Blender sidebar entry is active under Three.js engine', `(() => {const link=document.querySelector('nav[aria-label="Documentation sections"] a[aria-current="page"]');return link.getAttribute('href')==='/docs/blender-data-extraction' && link.closest('details').querySelector('summary').textContent.includes('Three.js engine');})()`);
+  await check('Blender page renders Python, TypeScript, tables, subheadings and checklist', `(() => {const article=document.querySelector('article');return article.querySelectorAll('table').length>5 && article.querySelectorAll('.check-state').length>10 && article.querySelector('h3#position-location') && [...article.querySelectorAll('app-docs-code-block')].filter(block=>block.querySelector('.code-head').textContent.includes('python')).length===4 && article.textContent.includes('interface AnatomyAnnotation') && article.textContent.includes('Not yet extracted');})()`);
+  await check('Blender uses native diagrams with preserved decision branches and safe inline source links', `document.querySelector('article .diagram').textContent.includes('No →') && document.querySelector('article p a[href*="/docs/source/"]') && !document.querySelector('canvas')`);
+  await screenshot('docs-blender-desktop');
+  await evaluate(`document.querySelector('.right-column app-docs-toc a[href$="#surface-normals"]').click();true`);
+  await until(() => evaluate('location.hash==="#surface-normals" && Math.abs(document.getElementById("surface-normals").getBoundingClientRect().top-108)<12'), 'Blender normal section fragment');
+  const blenderTimeOrigin = await evaluate('performance.timeOrigin');
+  await send('Page.reload');
+  await until(() => evaluate(`performance.timeOrigin!==${blenderTimeOrigin} && document.querySelector('h1')?.textContent==='Blender & 3D Data Extraction' && !!document.getElementById('surface-normals')`), 'Blender direct reload');
+  await check('Blender direct refresh retains route and fragment', 'location.pathname==="/docs/blender-data-extraction" && location.hash==="#surface-normals"');
+  for (const term of ['Blender', 'Vertex', 'Normal', 'Annotation']) {
+    await key('k', 2);
+    await evaluate(`(() => {const input=document.querySelector('#docs-search-input');input.value=${JSON.stringify(term)};input.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`);
+    await until(() => evaluate(`[...document.querySelectorAll('[role=option] strong')].some(item=>item.textContent==='Blender & 3D Data Extraction')`), `Blender search result for ${term}`);
+    await check(`Blender content searchable for ${term}`, `[...document.querySelectorAll('[role=option] strong')].some(item=>item.textContent==='Blender & 3D Data Extraction')`);
+    await key('Escape');
+  }
+  await evaluate(`(() => {const input=document.querySelector('#docs-search-input');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));return true;})()`);
   await evaluate(`document.querySelector('nav[aria-label="Documentation sections"] a[href="/docs/architecture"]').click();true`);
   await waitHeading('Application architecture');
   await check('sidebar navigation marks the active route', `document.querySelector('nav[aria-label="Documentation sections"] a[aria-current="page"]').getAttribute('href')==='/docs/architecture'`);
@@ -119,7 +139,7 @@ try {
   await check('documentation theme survives reload', 'document.querySelector("app-docs-layout").classList.contains("dark")');
   await evaluate(`document.querySelector('button[aria-label="Use light theme"]').click();true`);
   // All conceptual routes are loaded directly, validating the dev server history fallback.
-  const directRoutes = ['getting-started','architecture','project-structure','angular-foundation','data-models','services','organ-viewer','threejs-engine','model-loading','geometry','dental-system','hotspots','raycasting','camera-controls','screenshots','persistence','performance','testing','api-reference','integration','troubleshooting','glossary','maintenance'];
+  const directRoutes = ['getting-started','architecture','project-structure','angular-foundation','data-models','services','organ-viewer','threejs-engine','model-loading','blender-data-extraction','geometry','dental-system','hotspots','raycasting','camera-controls','screenshots','persistence','performance','testing','api-reference','integration','troubleshooting','glossary','maintenance'];
   for (const route of directRoutes) {
     await send('Page.navigate', { url: baseUrl + '/docs/' + route });
     await until(() => evaluate(`location.pathname==='/docs/${route}' && !!document.querySelector('app-docs-page h1') && document.querySelector('h1').textContent!=='Page not found'`), route);
@@ -136,6 +156,9 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await sleep(250);
   await check('mobile page and scrollable code do not overflow viewport', 'document.documentElement.scrollWidth<=innerWidth && getComputedStyle(document.querySelector(".mobile-toc")).display!=="none"');
+  await navigate('/docs/blender-data-extraction', 'Blender & 3D Data Extraction');
+  await check('mobile Blender tables, code and diagram stay within the viewport', 'document.documentElement.scrollWidth<=innerWidth && [...document.querySelectorAll("article .table-wrap, article pre, article .diagram")].every(element=>element.getBoundingClientRect().right<=innerWidth)');
+  await screenshot('docs-blender-mobile');
   await click('button[aria-label="Open documentation navigation"]');
   await until(() => evaluate('document.querySelector("#docs-sidebar").getAttribute("aria-modal")==="true" && document.querySelector("main").hasAttribute("inert")'), 'mobile drawer rendered');
   await until(() => evaluate('Math.abs(document.querySelector("#docs-sidebar").getBoundingClientRect().left)<1'), 'drawer fully visible');

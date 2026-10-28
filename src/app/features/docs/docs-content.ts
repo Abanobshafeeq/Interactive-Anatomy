@@ -1,4 +1,4 @@
-import type { DocPage } from './docs.models';
+import { DocPage, plainText } from './docs.models';
 import { FOUNDATION_PAGES } from './content/foundation.pages';
 import { ENGINE_PAGES } from './content/engine.pages';
 import { DENTAL_PAGES } from './content/dental.pages';
@@ -19,10 +19,12 @@ export function searchableText(page: DocPage): string {
   return [page.title, page.description, ...page.sections.flatMap(section => [section.title,
     ...section.blocks.map(block => {
       switch (block.kind) {
-        case 'text': return block.text;
+        case 'text': return plainText(block.text);
+        case 'heading': return block.title;
+        case 'list': return block.items.map(item => plainText(item.text)).join(' ');
         case 'code': return block.code;
         case 'note': return block.title + ' ' + block.text;
-        case 'table': return block.columns.concat(block.rows.flat()).join(' ');
+        case 'table': return block.columns.concat(block.rows.flat()).map(plainText).join(' ');
         case 'diagram': return block.title + ' ' + block.description + ' ' + block.nodes.join(' ');
         case 'links': return block.links.map(link => link.label).join(' ');
         case 'api': return block.symbol;
